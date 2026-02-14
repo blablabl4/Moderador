@@ -1,0 +1,1472 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Painel Moderador IDSR</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #0f0f1a;
+            color: #f0f0f5;
+            font-family: 'Inter', -apple-system, sans-serif;
+            min-height: 100vh;
+        }
+
+        /* Header */
+        .header {
+            background: linear-gradient(135deg, #1a1a2e, #16213e);
+            padding: 20px 0;
+            text-align: center;
+            border-bottom: 2px solid #e94560;
+            margin-bottom: 24px;
+        }
+
+        .header h1 {
+            font-size: 24px;
+            font-weight: 700;
+            color: #fff;
+        }
+
+        .header h1 span {
+            color: #e94560;
+        }
+
+        /* Tabs */
+        .tabs {
+            display: flex;
+            gap: 0;
+            margin-bottom: 24px;
+            border-bottom: 2px solid #2a2a4a;
+        }
+
+        .tab-btn {
+            background: none;
+            border: none;
+            color: #888;
+            font-family: 'Inter', sans-serif;
+            font-size: 14px;
+            font-weight: 600;
+            padding: 12px 24px;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            margin-bottom: -2px;
+            transition: all 0.2s;
+        }
+
+        .tab-btn:hover {
+            color: #ccc;
+        }
+
+        .tab-btn.active {
+            color: #e94560;
+            border-bottom-color: #e94560;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .container {
+            max-width: 960px;
+            margin: 0 auto;
+            padding: 0 20px 40px;
+        }
+
+        /* Cards */
+        .card {
+            background: #1a1a2e;
+            border: 1px solid #2a2a4a;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            overflow: hidden;
+        }
+
+        .card-title {
+            background: linear-gradient(135deg, #16213e, #1a1a2e);
+            padding: 14px 20px;
+            font-size: 14px;
+            font-weight: 600;
+            color: #e94560;
+            border-bottom: 1px solid #2a2a4a;
+        }
+
+        .card-body {
+            padding: 20px;
+        }
+
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        @media (max-width: 700px) {
+            .grid-2 {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Status rows */
+        .status-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+            border-bottom: 1px solid #2a2a4a;
+        }
+
+        .status-row:last-child {
+            border-bottom: none;
+        }
+
+        .status-label {
+            font-size: 13px;
+            color: #888;
+            font-weight: 500;
+        }
+
+        .status-value {
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        /* Badges */
+        .badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.4px;
+            text-transform: uppercase;
+        }
+
+        .badge-green {
+            background: rgba(0, 230, 118, 0.12);
+            color: #00e676;
+            border: 1px solid rgba(0, 230, 118, 0.25);
+        }
+
+        .badge-red {
+            background: rgba(233, 69, 96, 0.12);
+            color: #e94560;
+            border: 1px solid rgba(233, 69, 96, 0.25);
+        }
+
+        .badge-yellow {
+            background: rgba(245, 166, 35, 0.12);
+            color: #f5a623;
+            border: 1px solid rgba(245, 166, 35, 0.25);
+        }
+
+        .badge-blue {
+            background: rgba(83, 52, 131, 0.12);
+            color: #a78bfa;
+            border: 1px solid rgba(83, 52, 131, 0.25);
+        }
+
+        /* Buttons */
+        .btn {
+            display: block;
+            width: 100%;
+            padding: 10px 16px;
+            border: none;
+            border-radius: 8px;
+            font-family: 'Inter', sans-serif;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-bottom: 8px;
+            text-align: center;
+        }
+
+        .btn:last-child {
+            margin-bottom: 0;
+        }
+
+        .btn:hover {
+            transform: translateY(-1px);
+            filter: brightness(1.1);
+        }
+
+        .btn-green {
+            background: #00c853;
+            color: #0f0f1a;
+        }
+
+        .btn-yellow {
+            background: #f5a623;
+            color: #0f0f1a;
+        }
+
+        .btn-red {
+            background: #e94560;
+            color: #fff;
+        }
+
+        .btn-outline {
+            background: transparent;
+            color: #a78bfa;
+            border: 1px solid #533483;
+        }
+
+        .btn-outline:hover {
+            background: rgba(83, 52, 131, 0.2);
+        }
+
+        /* QR */
+        .qr-wrapper {
+            text-align: center;
+            padding: 16px 0;
+        }
+
+        .qr-wrapper img {
+            max-width: 260px;
+            border-radius: 12px;
+            border: 3px solid #00e676;
+            box-shadow: 0 0 30px rgba(0, 230, 118, 0.1);
+        }
+
+        .qr-hint {
+            color: #666;
+            font-size: 12px;
+            margin-top: 10px;
+        }
+
+        .qr-placeholder {
+            color: #555;
+            font-size: 13px;
+            padding: 24px 0;
+            text-align: center;
+        }
+
+        /* Input row */
+        .input-row {
+            display: flex;
+            gap: 8px;
+        }
+
+        .input-row input {
+            flex: 1;
+            padding: 10px 12px;
+            background: #0f0f1a;
+            border: 1px solid #2a2a4a;
+            border-radius: 8px;
+            color: #f0f0f5;
+            font-family: 'Inter', sans-serif;
+            font-size: 13px;
+            outline: none;
+        }
+
+        .input-row input:focus {
+            border-color: #533483;
+        }
+
+        .input-row .btn {
+            width: auto;
+            margin-bottom: 0;
+            white-space: nowrap;
+        }
+
+        /* Logs */
+        .log-box {
+            background: #0a0a14;
+            border: 1px solid #1a1a2e;
+            border-radius: 8px;
+            padding: 12px;
+            height: 160px;
+            overflow-y: auto;
+            font-family: 'Consolas', monospace;
+            font-size: 11px;
+            line-height: 1.7;
+        }
+
+        .log-time {
+            color: #f5a623;
+        }
+
+        .log-msg {
+            color: #ccc;
+        }
+
+        /* Checklist */
+        .checklist-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 14px;
+            border-bottom: 1px solid #1a1a2e;
+            transition: background 0.15s;
+        }
+
+        .checklist-item:hover {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .checklist-item:last-child {
+            border-bottom: none;
+        }
+
+        .check-icon {
+            font-size: 16px;
+            flex-shrink: 0;
+        }
+
+        .check-info {
+            flex: 1;
+        }
+
+        .check-name {
+            font-size: 13px;
+            font-weight: 600;
+            color: #eee;
+        }
+
+        .check-detail {
+            font-size: 11px;
+            color: #888;
+            margin-top: 2px;
+        }
+
+        /* Group card */
+        .group-card {
+            background: #16213e;
+            border: 1px solid #2a2a4a;
+            border-radius: 10px;
+            padding: 16px;
+            margin-bottom: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .group-card:hover {
+            border-color: #533483;
+            transform: translateX(3px);
+        }
+
+        .group-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .group-name {
+            font-size: 14px;
+            font-weight: 600;
+            color: #fff;
+        }
+
+        .group-meta {
+            font-size: 12px;
+            color: #888;
+            margin-top: 4px;
+        }
+
+        .group-badge {
+            font-size: 10px;
+        }
+
+        /* Participants modal */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 100;
+            backdrop-filter: blur(4px);
+        }
+
+        .modal-content {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: #1a1a2e;
+            border: 1px solid #2a2a4a;
+            border-radius: 16px;
+            width: 90%;
+            max-width: 520px;
+            max-height: 80vh;
+            overflow: hidden;
+            z-index: 101;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 20px;
+            border-bottom: 1px solid #2a2a4a;
+        }
+
+        .modal-header h3 {
+            font-size: 15px;
+            color: #e94560;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            color: #888;
+            font-size: 20px;
+            cursor: pointer;
+        }
+
+        .modal-body {
+            padding: 0;
+            max-height: 60vh;
+            overflow-y: auto;
+        }
+
+        .participant-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 20px;
+            border-bottom: 1px solid #111;
+        }
+
+        .participant-row:hover {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .p-name {
+            font-size: 13px;
+            color: #eee;
+        }
+
+        .p-id {
+            font-size: 11px;
+            color: #666;
+        }
+
+        /* Scan summary */
+        .scan-summary {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .scan-stat {
+            background: #16213e;
+            border: 1px solid #2a2a4a;
+            border-radius: 10px;
+            padding: 16px;
+            text-align: center;
+        }
+
+        .scan-stat-value {
+            font-size: 28px;
+            font-weight: 700;
+            color: #e94560;
+        }
+
+        .scan-stat-label {
+            font-size: 11px;
+            color: #888;
+            margin-top: 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        /* Settings */
+        .setting-group {
+            margin-bottom: 24px;
+        }
+
+        .setting-group-title {
+            font-size: 13px;
+            font-weight: 700;
+            color: #e94560;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 12px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid #2a2a4a;
+        }
+
+        .setting-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+            gap: 16px;
+        }
+
+        .setting-row:last-child {
+            border-bottom: none;
+        }
+
+        .setting-label {
+            font-size: 13px;
+            color: #ccc;
+            flex: 1;
+        }
+
+        .setting-label small {
+            display: block;
+            font-size: 11px;
+            color: #666;
+            margin-top: 2px;
+        }
+
+        .setting-input {
+            background: #0f0f1a;
+            border: 1px solid #2a2a4a;
+            border-radius: 8px;
+            color: #f0f0f5;
+            font-family: 'Inter', sans-serif;
+            font-size: 13px;
+            padding: 8px 12px;
+            width: 120px;
+            text-align: center;
+            transition: border 0.2s;
+        }
+
+        .setting-input:focus {
+            outline: none;
+            border-color: #533483;
+        }
+
+        .setting-input-wide {
+            width: 100%;
+            text-align: left;
+        }
+
+        .setting-toggle {
+            position: relative;
+            width: 48px;
+            height: 26px;
+            flex-shrink: 0;
+        }
+
+        .setting-toggle input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: #2a2a4a;
+            border-radius: 26px;
+            transition: 0.3s;
+        }
+
+        .toggle-slider:before {
+            content: '';
+            position: absolute;
+            height: 20px;
+            width: 20px;
+            left: 3px;
+            bottom: 3px;
+            background: #888;
+            border-radius: 50%;
+            transition: 0.3s;
+        }
+
+        .setting-toggle input:checked+.toggle-slider {
+            background: #1a8a4a;
+        }
+
+        .setting-toggle input:checked+.toggle-slider:before {
+            transform: translateX(22px);
+            background: #4ae88a;
+        }
+
+        select.setting-input {
+            appearance: none;
+            -webkit-appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 10px center;
+            padding-right: 28px;
+            cursor: pointer;
+        }
+
+        .settings-save-bar {
+            position: sticky;
+            bottom: 0;
+            background: linear-gradient(transparent, #0f0f1a 30%);
+            padding: 20px 0 10px;
+            text-align: center;
+        }
+
+        .btn-save {
+            background: linear-gradient(135deg, #1a8a4a, #0e6b34);
+            color: #fff;
+            border: none;
+            border-radius: 10px;
+            padding: 12px 40px;
+            font-family: 'Inter', sans-serif;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-save:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 15px rgba(26, 138, 74, 0.3);
+        }
+
+        .save-feedback {
+            font-size: 12px;
+            color: #4ae88a;
+            margin-top: 8px;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+
+        .save-feedback.show {
+            opacity: 1;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="header">
+        <h1>🤖 <span>Moderador</span> IDSR</h1>
+    </div>
+
+    <div class="container">
+        <!-- Tabs -->
+        <div class="tabs">
+            <button class="tab-btn active" onclick="switchTab('painel')">📡 Painel</button>
+            <button class="tab-btn" onclick="switchTab('grupos')">👥 Grupos</button>
+            <button class="tab-btn" onclick="switchTab('varredura')">🔍 Varredura</button>
+            <button class="tab-btn" onclick="switchTab('afiliados')">🔗 Afiliados</button>
+            <button class="tab-btn" onclick="switchTab('config')">⚙️ Configurações</button>
+        </div>
+
+        <!-- TAB: PAINEL -->
+        <div id="tab-painel" class="tab-content active">
+            <div class="grid-2">
+                <div class="card">
+                    <div class="card-title">📡 Status do Sistema</div>
+                    <div class="card-body">
+                        <div class="status-row">
+                            <span class="status-label">Bot Webserver</span>
+                            <span class="badge badge-green">Online</span>
+                        </div>
+                        <div class="status-row">
+                            <span class="status-label">WPP Conexão</span>
+                            <span id="wpp-status" class="badge badge-yellow">Verificando...</span>
+                        </div>
+                        <div class="status-row">
+                            <span class="status-label">Status da Sessão</span>
+                            <span id="session-status" class="badge badge-blue">...</span>
+                        </div>
+                        <div class="status-row">
+                            <span class="status-label">Sessão</span>
+                            <span class="status-value" style="color:#a78bfa;">{{ session_name }}</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-title">⚙️ Controle da Sessão</div>
+                    <div class="card-body">
+                        <button onclick="sessionAction('start')" class="btn btn-green">▶️ Iniciar / Reconectar</button>
+                        <button onclick="sessionAction('close')" class="btn btn-yellow">⏹️ Fechar Sessão</button>
+                        <button onclick="sessionAction('logout')" class="btn btn-red">🚪 Deslogar (novo QR)</button>
+                        <button onclick="fetchQRCode()" class="btn btn-outline">🔄 Atualizar QR Code</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-title">📱 QR Code WhatsApp</div>
+                <div class="card-body">
+                    <div id="qr-container" class="qr-wrapper" style="display:none;">
+                        <div id="qr-code"></div>
+                        <p class="qr-hint">WhatsApp → Menu (⋮) → Aparelhos conectados → Conectar</p>
+                    </div>
+                    <div id="qr-placeholder" class="qr-placeholder">
+                        Clique <strong>"Iniciar / Reconectar"</strong> → <strong>"Atualizar QR Code"</strong>
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid-2">
+                <div class="card">
+                    <div class="card-title">👥 Ações nos Grupos</div>
+                    <div class="card-body">
+                        <button onclick="triggerAction('open')" class="btn btn-green">🔓 Abrir Grupos</button>
+                        <button onclick="triggerAction('close')" class="btn btn-red">🔒 Fechar Grupos</button>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-title">📢 Anúncios</div>
+                    <div class="card-body">
+                        <div class="input-row">
+                            <input type="text" id="announce-text" placeholder="Mensagem do anúncio...">
+                            <button onclick="sendAnnouncement()" class="btn btn-outline">📢 Enviar</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-title">📋 Logs</div>
+                <div class="card-body">
+                    <div id="logs" class="log-box">
+                        <div style="color:#555;">Aguardando...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB: GRUPOS -->
+        <div id="tab-grupos" class="tab-content">
+            <div class="card">
+                <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
+                    👥 Grupos do Bot
+                    <button onclick="loadGroups()" class="btn btn-outline"
+                        style="width:auto;margin:0;padding:6px 16px;font-size:12px;">🔄 Atualizar</button>
+                </div>
+                <div class="card-body">
+                    <div id="groups-loading" style="text-align:center;color:#888;padding:20px;">
+                        Clique em "Atualizar" para carregar os grupos
+                    </div>
+                    <div id="groups-list"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB: VARREDURA -->
+        <div id="tab-varredura" class="tab-content">
+            <div style="text-align:center;margin-bottom:20px;">
+                <button onclick="runScan()" class="btn btn-green"
+                    style="width:auto;display:inline-block;padding:12px 32px;font-size:14px;">🔍 Iniciar Varredura
+                    Completa</button>
+            </div>
+
+            <div id="scan-results" style="display:none;">
+                <div id="scan-summary" class="scan-summary"></div>
+
+                <div class="card">
+                    <div class="card-title">✅ Checklist do Sistema</div>
+                    <div class="card-body" style="padding:0;">
+                        <div id="system-checks"></div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-title">📋 Checklist dos Grupos</div>
+                    <div class="card-body" style="padding:0;">
+                        <div id="group-checks"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB: CONFIG -->
+        <div id="tab-config" class="tab-content">
+            <div class="card">
+                <div class="card-title">⚙️ Configurações do Bot</div>
+                <div class="card-body">
+                    <div id="settings-loading" style="text-align:center;color:#888;padding:20px;">Carregando
+                        configurações...</div>
+                    <div id="settings-form" style="display:none;">
+
+                        <div class="setting-group">
+                            <div class="setting-group-title">🛡️ Anti-Flood (Limites por Pessoa/Dia)</div>
+                            <div class="setting-row">
+                                <div class="setting-label">Moderação ativa<small>Liga/desliga todo o controle de
+                                        flood</small></div>
+                                <label class="setting-toggle"><input type="checkbox" id="cfg-moderation_enabled"><span
+                                        class="toggle-slider"></span></label>
+                            </div>
+                            <div class="setting-row">
+                                <div class="setting-label">🧪 Modo Teste (Dry-Run)<small>Loga ações sem apagar/avisar
+                                        ninguém — use para validar regras</small></div>
+                                <label class="setting-toggle"><input type="checkbox" id="cfg-dry_run_mode"><span
+                                        class="toggle-slider"></span></label>
+                            </div>
+                            <div id="dry-run-badge"
+                                style="display:none;background:rgba(255,200,0,0.15);border:1px solid #ffcc00;border-radius:8px;padding:8px 12px;margin-bottom:12px;color:#ffcc00;font-size:13px;text-align:center;">
+                                🧪 MODO TESTE ATIVO — Bot registra mas NÃO apaga mensagens</div>
+                            <div class="setting-row">
+                                <div class="setting-label">Máximo de mensagens<small>Número de anúncios permitidos por
+                                        pessoa antes de bloquear</small></div>
+                                <input type="number" class="setting-input" id="cfg-flood_max_messages" min="1" max="50">
+                            </div>
+                            <div class="setting-row">
+                                <div class="setting-label">⏳ Tempo entre anúncios (minutos)<small>Após postar, o usuário
+                                        precisa esperar esse tempo para postar novamente</small></div>
+                                <input type="number" class="setting-input" id="cfg-flood_window_minutes" min="5"
+                                    max="1440" step="5">
+                            </div>
+                            <div class="setting-row">
+                                <div class="setting-label">Máximo de fotos/mídia<small>Número de fotos permitidas por
+                                        pessoa/dia</small></div>
+                                <input type="number" class="setting-input" id="cfg-flood_max_photos" min="1" max="50">
+                            </div>
+                            <div class="setting-row">
+                                <div class="setting-label">Tamanho máx. do texto<small>Caracteres. 0 = sem
+                                        limite</small></div>
+                                <input type="number" class="setting-input" id="cfg-flood_max_text_length" min="0"
+                                    max="5000">
+                            </div>
+                            <div class="setting-row">
+                                <div class="setting-label">Ação ao exceder limite<small>O que fazer quando o usuário
+                                        ultrapassar</small></div>
+                                <select class="setting-input" id="cfg-flood_action" style="width:180px;">
+                                    <option value="delete">Apagar mensagem</option>
+                                    <option value="delete_warn">Apagar + Avisar</option>
+                                    <option value="warn">Apenas avisar</option>
+                                </select>
+                            </div>
+                            <div class="setting-row">
+                                <div class="setting-label">Mensagem de aviso<small>Enviada quando o usuário excede o
+                                        limite</small></div>
+                                <input type="text" class="setting-input setting-input-wide" id="cfg-warn_message">
+                            </div>
+                        </div>
+
+                        <div class="setting-group">
+                            <div class="setting-group-title">🔗 Filtro de Links</div>
+                            <div class="setting-row">
+                                <div class="setting-label">Filtro de links ativo<small>Bloqueia links não
+                                        autorizados</small></div>
+                                <label class="setting-toggle"><input type="checkbox" id="cfg-link_filter_enabled"><span
+                                        class="toggle-slider"></span></label>
+                            </div>
+                            <div class="setting-row">
+                                <div class="setting-label">Domínios permitidos<small>Separados por vírgula</small></div>
+                                <input type="text" class="setting-input setting-input-wide" id="cfg-whitelist_domains"
+                                    placeholder="idsr.com.br, tvzapao.com.br">
+                            </div>
+                            <div class="setting-row">
+                                <div class="setting-label">Ação ao detectar link<small>O que fazer com links
+                                        proibidos</small></div>
+                                <select class="setting-input" id="cfg-link_action" style="width:180px;">
+                                    <option value="delete">Apagar mensagem</option>
+                                    <option value="delete_warn">Apagar + Avisar</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="setting-group">
+                            <div class="setting-group-title">⏰ Agendador (Abrir/Fechar Grupos)</div>
+                            <div class="setting-row">
+                                <div class="setting-label">Agendador ativo<small>Abre e fecha grupos
+                                        automaticamente</small></div>
+                                <label class="setting-toggle"><input type="checkbox" id="cfg-schedule_enabled"><span
+                                        class="toggle-slider"></span></label>
+                            </div>
+                            <div class="setting-row">
+                                <div class="setting-label">Hora de abrir<small>Horário para abrir os grupos
+                                        (0-23)</small></div>
+                                <input type="number" class="setting-input" id="cfg-schedule_open_hour" min="0" max="23">
+                            </div>
+                            <div class="setting-row">
+                                <div class="setting-label">Hora de fechar<small>Horário para fechar os grupos
+                                        (0-23)</small></div>
+                                <input type="number" class="setting-input" id="cfg-schedule_close_hour" min="0"
+                                    max="23">
+                            </div>
+                        </div>
+
+                        <div class="setting-group">
+                            <div class="setting-group-title">👑 Super Admins</div>
+                            <div class="setting-row">
+                                <div class="setting-label">Números dos admins<small>Separados por vírgula (ex:
+                                        5511999999999)</small></div>
+                                <input type="text" class="setting-input setting-input-wide" id="cfg-super_admins"
+                                    placeholder="5511999999999, 5511888888888">
+                            </div>
+                        </div>
+
+                        <div class="settings-section">
+                            <h3 style="color:#e94560;margin:0 0 12px;">🎯 Grupos Monitorados</h3>
+                            <p style="color:#888;margin:0 0 10px;font-size:13px;">Selecione quais grupos serão
+                                moderados. Se nenhum for selecionado, <strong>todos</strong> os grupos serão moderados.
+                            </p>
+                            <div id="monitored-groups-list"
+                                style="max-height:200px;overflow-y:auto;background:rgba(0,0,0,0.2);border-radius:8px;padding:8px;">
+                                <div style="color:#666;padding:8px;">⏳ Carregando grupos...</div>
+                            </div>
+                            <div class="setting-row" style="margin-top:12px;">
+                                <div class="setting-label">Grupos exclusivos<small>Impede que um membro esteja em mais
+                                        de um grupo monitorado</small></div>
+                                <label class="setting-toggle"><input type="checkbox"
+                                        id="cfg-exclusive_groups_enabled"><span class="toggle-slider"></span></label>
+                            </div>
+                            <div class="setting-row">
+                                <div class="setting-label">Mensagem de remoção<small>Enviada no privado ao membro
+                                        removido</small></div>
+                                <input type="text" class="setting-input setting-input-wide"
+                                    id="cfg-exclusive_groups_message"
+                                    placeholder="⚠️ Você já faz parte de outro grupo moderado.">
+                            </div>
+                        </div>
+
+                        <div class="settings-save-bar">
+                            <button class="btn-save" onclick="saveSettings()">💾 Salvar Configurações</button>
+                            <div class="save-feedback" id="save-feedback">✅ Configurações salvas com sucesso!</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB: AFILIADOS -->
+        <div id="tab-afiliados" class="tab-content">
+            <!-- Stats -->
+            <div class="grid-2">
+                <div class="card">
+                    <div class="card-title">📊 Resumo do Sistema</div>
+                    <div class="card-body">
+                        <div class="status-row">
+                            <span class="status-label">Total de Afiliados</span>
+                            <span class="status-value" id="aff-total" style="color:#25D366;">...</span>
+                        </div>
+                        <div class="status-row">
+                            <span class="status-label">Cliques Totais</span>
+                            <span class="status-value" id="aff-clicks" style="color:#f5a623;">...</span>
+                        </div>
+                        <div class="status-row">
+                            <span class="status-label">Entradas Confirmadas</span>
+                            <span class="status-value" id="aff-confirmed" style="color:#e94560;">...</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-title">🔗 Links Rápidos</div>
+                    <div class="card-body">
+                        <a href="/criar-link" target="_blank" class="btn btn-green"
+                            style="text-decoration:none;text-align:center;margin-bottom:8px;">📝 Criar Link de
+                            Afiliado</a>
+                        <a href="/ranking" target="_blank" class="btn btn-outline"
+                            style="text-decoration:none;text-align:center;">🏆 Ver Ranking Público</a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Managed Groups -->
+            <div class="card">
+                <div class="card-title">📱 Grupos no Sistema de Afiliados</div>
+                <div class="card-body">
+                    <p style="color:#888;font-size:12px;margin-bottom:12px;">Selecione quais grupos do bot serão usados
+                        para receber membros via links de afiliados.</p>
+
+                    <div
+                        style="font-size:12px;font-weight:600;color:#25D366;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px;">
+                        ✅ Grupos Ativos</div>
+                    <div id="managed-groups-list" style="margin-bottom:16px;">
+                        <div style="color:#666;padding:8px;">⏳ Carregando...</div>
+                    </div>
+
+                    <div
+                        style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:16px;">
+                        <div
+                            style="font-size:12px;font-weight:600;color:#e94560;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px;">
+                            ➕ Adicionar Grupo do Bot</div>
+                        <div id="bot-groups-picker"
+                            style="max-height:250px;overflow-y:auto;background:rgba(0,0,0,0.2);border-radius:8px;padding:8px;">
+                            <div style="color:#666;padding:8px;">⏳ Carregando grupos do bot...</div>
+                        </div>
+                        <div style="display:flex;gap:8px;margin-top:12px;align-items:center;">
+                            <input type="number" id="mg-max" placeholder="Limite por grupo" value="256"
+                                class="setting-input" style="width:140px;">
+                            <button onclick="addSelectedGroups()" class="btn btn-green" style="flex:1;">Adicionar
+                                Selecionados</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Ranking -->
+            <div class="card">
+                <div class="card-title">🏆 Top Afiliados</div>
+                <div class="card-body">
+                    <div id="aff-ranking-list">
+                        <div style="color:#666;padding:8px;">⏳ Carregando ranking...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Participants Modal -->
+    <div id="modal-overlay" class="modal-overlay" onclick="closeModal()">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h3 id="modal-title">Participantes</h3>
+                <button class="modal-close" onclick="closeModal()">✕</button>
+            </div>
+            <div class="modal-body" id="modal-body"></div>
+        </div>
+    </div>
+
+    <script>
+        // --- TAB SWITCHING ---
+        function switchTab(name) {
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            document.getElementById('tab-' + name).classList.add('active');
+            event.target.classList.add('active');
+            if (name === 'config') loadSettings();
+        }
+
+        // --- STATUS ---
+        async function updateStatus() {
+            try {
+                const res = await fetch('/api/status');
+                const data = await res.json();
+                const wb = document.getElementById('wpp-status');
+                const sb = document.getElementById('session-status');
+                if (data.wpp_connected) {
+                    wb.className = 'badge badge-green'; wb.innerText = 'CONECTADO';
+                    document.getElementById('qr-container').style.display = 'none';
+                    document.getElementById('qr-placeholder').style.display = 'block';
+                } else {
+                    wb.className = 'badge badge-red'; wb.innerText = 'DESCONECTADO';
+                }
+                sb.innerText = data.session_status || 'UNKNOWN';
+                sb.className = data.wpp_connected ? 'badge badge-green' : 'badge badge-yellow';
+                log('Status: ' + (data.session_status || '?') + ' | Conectado: ' + (data.wpp_connected ? 'SIM ✅' : 'NÃO ❌'));
+            } catch (e) { log('Erro status: ' + e); }
+        }
+
+        // --- QR CODE ---
+        async function fetchQRCode() {
+            log('Buscando QR...');
+            try {
+                const res = await fetch('/api/qr');
+                const data = await res.json();
+                if (data.qr) {
+                    document.getElementById('qr-container').style.display = 'block';
+                    document.getElementById('qr-placeholder').style.display = 'none';
+                    if (data.qr.startsWith('data:image')) {
+                        document.getElementById('qr-code').innerHTML = '<img src="' + data.qr + '" />';
+                    } else {
+                        document.getElementById('qr-code').innerHTML = '<pre style="color:#0f0;font-size:5px;line-height:5px;">' + data.qr + '</pre>';
+                    }
+                    log('✅ QR carregado! Escaneie!');
+                } else { log('⚠️ QR: ' + (data.status || 'sem QR')); }
+            } catch (e) { log('❌ Erro QR: ' + e); }
+        }
+
+        // --- SESSION ---
+        async function sessionAction(action) {
+            const labels = { start: 'Iniciando', close: 'Fechando', logout: 'Deslogando' };
+            log('⏳ ' + labels[action] + '...');
+            try {
+                const res = await fetch('/api/session/' + action, { method: 'POST' });
+                const data = await res.json();
+                log('✅ ' + data.message); alert(data.message);
+                if (action === 'start') setTimeout(fetchQRCode, 3000);
+                setTimeout(updateStatus, 2000);
+            } catch (e) { log('❌ ' + e); }
+        }
+
+        // --- GROUPS ---
+        async function triggerAction(action) {
+            if (!confirm('Tem certeza?')) return;
+            try {
+                const res = await fetch('/api/groups/' + action, { method: 'POST' });
+                const data = await res.json();
+                log('Grupos ' + action + ': ' + data.status); alert(data.message);
+            } catch (e) { log('Erro: ' + e); }
+        }
+
+        async function sendAnnouncement() {
+            const text = document.getElementById('announce-text').value;
+            if (!text) return alert('Digite uma mensagem!');
+            if (!confirm('Enviar para TODOS os grupos?')) return;
+            try {
+                const res = await fetch('/api/announce', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text }) });
+                const data = await res.json();
+                log('📢 ' + data.status); alert(data.message);
+                document.getElementById('announce-text').value = '';
+            } catch (e) { log('Erro: ' + e); }
+        }
+
+        // --- GROUPS TAB ---
+        async function loadGroups() {
+            document.getElementById('groups-loading').innerHTML = '<div style="color:#f5a623;">⏳ Carregando grupos...</div>';
+            document.getElementById('groups-list').innerHTML = '';
+            try {
+                const res = await fetch('/api/groups/list');
+                const data = await res.json();
+                document.getElementById('groups-loading').style.display = 'none';
+
+                if (!data.groups || data.groups.length === 0) {
+                    document.getElementById('groups-list').innerHTML = '<div style="text-align:center;color:#888;padding:20px;">Nenhum grupo encontrado. O bot precisa estar em pelo menos um grupo.</div>';
+                    return;
+                }
+
+                let html = '';
+                data.groups.forEach(g => {
+                    const adminBadge = g.is_admin ? '<span class="badge badge-green group-badge">Admin</span>' : '<span class="badge badge-yellow group-badge">Membro</span>';
+                    html += '<div class="group-card" onclick="showParticipants(\'' + g.id + '\', \'' + g.name.replace(/'/g, "\\'") + '\')">' +
+                        '<div class="group-header">' +
+                        '<span class="group-name">' + g.name + '</span>' +
+                        adminBadge +
+                        '</div>' +
+                        '<div class="group-meta">👥 ' + (g.size || '?') + ' membros  •  ID: ' + (g.id || '').substring(0, 20) + '...</div>' +
+                        '</div>';
+                });
+                document.getElementById('groups-list').innerHTML = html;
+                log('📋 ' + data.total + ' grupos carregados');
+            } catch (e) {
+                document.getElementById('groups-loading').innerHTML = '<div style="color:#e94560;">❌ Erro: ' + e + '</div>';
+            }
+        }
+
+        // --- PARTICIPANTS MODAL ---
+        async function showParticipants(groupId, groupName) {
+            document.getElementById('modal-overlay').style.display = 'block';
+            document.getElementById('modal-title').innerText = groupName;
+            document.getElementById('modal-body').innerHTML = '<div style="text-align:center;padding:30px;color:#888;">⏳ Carregando...</div>';
+            try {
+                const res = await fetch('/api/groups/' + encodeURIComponent(groupId) + '/participants');
+                const data = await res.json();
+
+                if (!data.participants || data.participants.length === 0) {
+                    document.getElementById('modal-body').innerHTML = '<div style="text-align:center;padding:30px;color:#888;">Sem dados de participantes</div>';
+                    return;
+                }
+
+                let html = '';
+                data.participants.forEach(p => {
+                    const adminTag = p.is_admin ? ' <span class="badge badge-green" style="font-size:9px;">Admin</span>' : '';
+                    html += '<div class="participant-row">' +
+                        '<div><span class="p-name">' + p.name + adminTag + '</span><br><span class="p-id">' + p.id + '</span></div>' +
+                        '</div>';
+                });
+                document.getElementById('modal-body').innerHTML = html;
+            } catch (e) {
+                document.getElementById('modal-body').innerHTML = '<div style="color:#e94560;padding:20px;">Erro: ' + e + '</div>';
+            }
+        }
+        function closeModal() { document.getElementById('modal-overlay').style.display = 'none'; }
+
+        // --- SCAN TAB ---
+        async function runScan() {
+            log('🔍 Iniciando varredura completa...');
+            document.getElementById('scan-results').style.display = 'none';
+            try {
+                const res = await fetch('/api/scan', { method: 'POST' });
+                const data = await res.json();
+                document.getElementById('scan-results').style.display = 'block';
+
+                // Summary
+                const s = data.summary;
+                document.getElementById('scan-summary').innerHTML =
+                    '<div class="scan-stat"><div class="scan-stat-value">' + s.total_groups + '</div><div class="scan-stat-label">Grupos</div></div>' +
+                    '<div class="scan-stat"><div class="scan-stat-value">' + s.groups_as_admin + '</div><div class="scan-stat-label">Bot é Admin</div></div>' +
+                    '<div class="scan-stat"><div class="scan-stat-value">' + s.total_members + '</div><div class="scan-stat-label">Membros Total</div></div>';
+
+                // System checks
+                let sysHtml = '';
+                data.system_checks.forEach(c => {
+                    const icon = c.status === 'ok' ? '✅' : c.status === 'warning' ? '⚠️' : '❌';
+                    sysHtml += '<div class="checklist-item">' +
+                        '<span class="check-icon">' + icon + '</span>' +
+                        '<div class="check-info"><div class="check-name">' + c.item + '</div><div class="check-detail">' + c.detail + '</div></div>' +
+                        '</div>';
+                });
+                document.getElementById('system-checks').innerHTML = sysHtml;
+
+                // Group checks
+                let grpHtml = '';
+                data.checklist.forEach(c => {
+                    const icon = c.status === 'ok' ? '✅' : '❌';
+                    grpHtml += '<div class="checklist-item">' +
+                        '<span class="check-icon">' + icon + '</span>' +
+                        '<div class="check-info"><div class="check-name">' + c.item + '</div><div class="check-detail">' + c.detail + '</div></div>' +
+                        '</div>';
+                });
+                document.getElementById('group-checks').innerHTML = grpHtml || '<div style="padding:16px;color:#888;text-align:center;">Nenhum grupo encontrado</div>';
+
+                log('✅ Varredura concluída: ' + s.total_groups + ' grupos, ' + s.total_members + ' membros');
+            } catch (e) {
+                log('❌ Erro na varredura: ' + e);
+            }
+        }
+
+        // --- LOG ---
+        function log(msg) {
+            const logs = document.getElementById('logs');
+            const t = new Date().toLocaleTimeString('pt-BR');
+            logs.innerHTML += '<div><span class="log-time">[' + t + ']</span> <span class="log-msg">' + msg + '</span></div>';
+            logs.scrollTop = logs.scrollHeight;
+        }
+
+        // --- SETTINGS ---
+        async function loadSettings() {
+            try {
+                const res = await fetch('/api/settings');
+                const s = await res.json();
+
+                // Toggles
+                document.getElementById('cfg-moderation_enabled').checked = s.moderation_enabled !== false;
+                document.getElementById('cfg-dry_run_mode').checked = s.dry_run_mode === true;
+                document.getElementById('cfg-link_filter_enabled').checked = s.link_filter_enabled !== false;
+                document.getElementById('cfg-schedule_enabled').checked = s.schedule_enabled !== false;
+
+                // Show dry-run badge if active
+                document.getElementById('dry-run-badge').style.display = s.dry_run_mode ? 'block' : 'none';
+                document.getElementById('cfg-dry_run_mode').addEventListener('change', function () {
+                    document.getElementById('dry-run-badge').style.display = this.checked ? 'block' : 'none';
+                });
+
+                // Numbers
+                document.getElementById('cfg-flood_max_messages').value = s.flood_max_messages || 1;
+                document.getElementById('cfg-flood_max_photos').value = s.flood_max_photos || 3;
+                document.getElementById('cfg-flood_max_text_length').value = s.flood_max_text_length || 300;
+                document.getElementById('cfg-flood_window_minutes').value = s.flood_window_minutes || 5;
+                document.getElementById('cfg-schedule_open_hour').value = s.schedule_open_hour ?? 10;
+                document.getElementById('cfg-schedule_close_hour').value = s.schedule_close_hour ?? 20;
+
+                // Selects
+                document.getElementById('cfg-flood_action').value = s.flood_action || 'delete';
+                document.getElementById('cfg-link_action').value = s.link_action || 'delete';
+
+                // Text
+                document.getElementById('cfg-warn_message').value = s.warn_message || '';
+                document.getElementById('cfg-exclusive_groups_message').value = s.exclusive_groups_message || '';
+                document.getElementById('cfg-exclusive_groups_enabled').checked = s.exclusive_groups_enabled === true;
+
+                // Arrays as comma-separated
+                document.getElementById('cfg-whitelist_domains').value = (s.whitelist_domains || []).join(', ');
+                document.getElementById('cfg-super_admins').value = (s.super_admins || []).join(', ');
+
+                // Load monitored groups checkboxes
+                const monitoredGroups = s.monitored_groups || [];
+                try {
+                    const gRes = await fetch('/api/groups/list');
+                    const gData = await gRes.json();
+                    const container = document.getElementById('monitored-groups-list');
+                    if (gData.groups && gData.groups.length > 0) {
+                        container.innerHTML = gData.groups.map(g => {
+                            const checked = monitoredGroups.includes(g.id) ? 'checked' : '';
+                            return `<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;cursor:pointer;border-bottom:1px solid rgba(255,255,255,0.05);">
+                                <input type="checkbox" class="monitored-group-cb" value="${g.id}" ${checked} style="accent-color:#e94560;">
+                                <span style="color:#ccc;font-size:13px;">${g.name}</span>
+                            </label>`;
+                        }).join('');
+                    } else {
+                        container.innerHTML = '<div style="color:#666;padding:8px;">Nenhum grupo encontrado</div>';
+                    }
+                } catch (ge) {
+                    document.getElementById('monitored-groups-list').innerHTML = '<div style="color:#e94560;padding:8px;">Erro ao carregar grupos</div>';
+                }
+
+                document.getElementById('settings-loading').style.display = 'none';
+                document.getElementById('settings-form').style.display = 'block';
+                log('⚙️ Configurações carregadas');
+            } catch (e) {
+                document.getElementById('settings-loading').innerHTML = '<div style="color:#e94560;">❌ Erro: ' + e + '</div>';
+            }
+        }
+
+        async function saveSettings() {
+            const settings = {
+                moderation_enabled: document.getElementById('cfg-moderation_enabled').checked,
+                dry_run_mode: document.getElementById('cfg-dry_run_mode').checked,
+                link_filter_enabled: document.getElementById('cfg-link_filter_enabled').checked,
+                schedule_enabled: document.getElementById('cfg-schedule_enabled').checked,
+                flood_max_messages: parseInt(document.getElementById('cfg-flood_max_messages').value) || 1,
+                flood_max_photos: parseInt(document.getElementById('cfg-flood_max_photos').value) || 3,
+                flood_max_text_length: parseInt(document.getElementById('cfg-flood_max_text_length').value) || 0,
+                flood_window_minutes: parseInt(document.getElementById('cfg-flood_window_minutes').value) || 5,
+                flood_action: document.getElementById('cfg-flood_action').value,
+                link_action: document.getElementById('cfg-link_action').value,
+                warn_message: document.getElementById('cfg-warn_message').value,
+                schedule_open_hour: parseInt(document.getElementById('cfg-schedule_open_hour').value) || 10,
+                schedule_close_hour: parseInt(document.getElementById('cfg-schedule_close_hour').value) || 20,
+                whitelist_domains: document.getElementById('cfg-whitelist_domains').value.split(',').map(s => s.trim()).filter(Boolean),
+                super_admins: document.getElementById('cfg-super_admins').value.split(',').map(s => s.trim()).filter(Boolean),
+                monitored_groups: [...document.querySelectorAll('.monitored-group-cb:checked')].map(cb => cb.value),
+                exclusive_groups_enabled: document.getElementById('cfg-exclusive_groups_enabled').checked,
+                exclusive_groups_message: document.getElementById('cfg-exclusive_groups_message').value,
+            };
+
+            try {
+                const res = await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(settings)
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    const fb = document.getElementById('save-feedback');
+                    fb.classList.add('show');
+                    setTimeout(() => fb.classList.remove('show'), 3000);
+                    log('✅ Configurações salvas!');
+                } else {
+                    alert('Erro ao salvar: ' + (data.message || 'erro desconhecido'));
+                }
+            } catch (e) {
+                alert('Erro: ' + e);
+            }
+        }
+
+
+        // --- AFFILIATE SYSTEM ---
+        async function loadAffiliateData() {
+            try {
+                const res = await fetch('/api/affiliate/stats');
+                const data = await res.json();
+                document.getElementById('aff-total').textContent = data.total_affiliates;
+                document.getElementById('aff-clicks').textContent = data.total_clicks;
+                document.getElementById('aff-confirmed').textContent = data.total_confirmed;
+
+                const list = document.getElementById('aff-ranking-list');
+                if (data.ranking && data.ranking.length > 0) {
+                    list.innerHTML = data.ranking.map((r, i) => `
+                        <div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid #1a1a2e;">
+                            <span style="width:28px;text-align:center;font-weight:700;color:${i < 3 ? '#ffd200' : '#555'};">${i + 1}º</span>
+                            <div style="flex:1;">
+                                <div style="font-size:14px;font-weight:600;">${r.name}</div>
+                                <div style="font-size:11px;color:#666;">/entrar/${r.slug}</div>
+                            </div>
+                            <div style="text-align:right;">
+                                <div style="font-size:16px;font-weight:800;color:#25D366;">${r.confirmed}</div>
+                                <div style="font-size:10px;color:#888;">${r.confirmed === 1 ? 'entrada' : 'entradas'}</div>
+                            </div>
+                        </div>
+                    `).join('');
+                } else {
+                    list.innerHTML = '<div style="color:#666;padding:12px;text-align:center;">Nenhum afiliado cadastrado ainda.</div>';
+                }
+            } catch (e) { console.error('Affiliate stats error:', e); }
+        }
+
+        let _managedJids = new Set();
+
+        async function loadManagedGroups() {
+            try {
+                const res = await fetch('/api/groups/managed');
+                const data = await res.json();
+                const list = document.getElementById('managed-groups-list');
+                _managedJids.clear();
+                if (data.groups && data.groups.length > 0) {
+                    data.groups.forEach(g => _managedJids.add(g.group_jid));
+                    list.innerHTML = data.groups.map((g, i) => `
+                        <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;background:rgba(255,255,255,0.02);border-radius:10px;margin-bottom:6px;border:1px solid rgba(255,255,255,0.05);">
+                            <span style="width:24px;text-align:center;font-size:12px;color:#888;">${i + 1}</span>
+                            <div style="flex:1;">
+                                <div style="font-size:14px;font-weight:600;">${g.name || 'Sem nome'}</div>
+                                <div style="font-size:11px;color:#666;">${g.group_jid}</div>
+                            </div>
+                            <div style="text-align:right;min-width:100px;">
+                                <div style="font-size:13px;font-weight:700;color:${g.is_active ? '#25D366' : '#e94560'};">${g.current_members}/${g.max_members}</div>
+                                <div style="font-size:10px;color:${g.remaining > 50 ? '#25D366' : g.remaining > 0 ? '#ffd200' : '#e94560'};">${g.remaining > 0 ? 'faltam ' + g.remaining : '🚫 LOTADO'}</div>
+                                <span class="badge ${g.is_active ? 'badge-green' : 'badge-red'}" style="font-size:10px;">${g.is_active ? 'Ativo' : 'Lotado'}</span>
+                            </div>
+                            <button onclick="removeManagedGroup(${g.id})" style="background:none;border:none;color:#e94560;cursor:pointer;font-size:16px;" title="Remover">✕</button>
+                        </div>
+                    `).join('');
+                } else {
+                    list.innerHTML = '<div style="color:#666;padding:12px;text-align:center;">Nenhum grupo no sistema. Selecione abaixo e clique "Adicionar Selecionados".</div>';
+                }
+            } catch (e) { console.error('Managed groups error:', e); }
+        }
+
+        async function loadBotGroups() {
+            try {
+                const res = await fetch('/api/groups/list');
+                const data = await res.json();
+                const picker = document.getElementById('bot-groups-picker');
+                if (data.groups && data.groups.length > 0) {
+                    const available = data.groups.filter(g => !_managedJids.has(g.id));
+                    if (available.length === 0) {
+                        picker.innerHTML = '<div style="color:#25D366;padding:12px;text-align:center;">✅ Todos os grupos já estão no sistema!</div>';
+                        return;
+                    }
+                    picker.innerHTML = available.map(g => `
+                        <label style="display:flex;align-items:center;gap:10px;padding:8px;border-radius:8px;cursor:pointer;transition:background 0.15s;" onmouseover="this.style.background='rgba(255,255,255,0.04)'" onmouseout="this.style.background='transparent'">
+                            <input type="checkbox" class="bot-group-cb" value="${g.id}" data-name="${g.name}" style="accent-color:#25D366;width:18px;height:18px;">
+                            <div style="flex:1;">
+                                <div style="font-size:13px;font-weight:600;color:#fff;">${g.name}</div>
+                                <div style="font-size:10px;color:#666;">${g.id}</div>
+                            </div>
+                            <div style="font-size:12px;font-weight:700;color:#888;">${g.size} 👥</div>
+                        </label>
+                    `).join('');
+                } else {
+                    picker.innerHTML = '<div style="color:#666;padding:12px;text-align:center;">Nenhum grupo encontrado no bot.</div>';
+                }
+            } catch (e) { picker.innerHTML = '<div style="color:#e94560;padding:8px;">Erro ao carregar grupos.</div>'; }
+        }
+
+        async function addSelectedGroups() {
+            const cbs = document.querySelectorAll('.bot-group-cb:checked');
+            if (cbs.length === 0) { alert('Selecione pelo menos um grupo.'); return; }
+            const max = parseInt(document.getElementById('mg-max').value) || 256;
+            let added = 0;
+            for (const cb of cbs) {
+                try {
+                    const res = await fetch('/api/groups/managed/add', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ group_jid: cb.value, name: cb.dataset.name, max_members: max, display_order: added })
+                    });
+                    const data = await res.json();
+                    if (data.status === 'success') added++;
+                } catch (e) { console.error(e); }
+            }
+            log(`✅ ${added} grupo(s) adicionados ao sistema de afiliados`);
+            loadManagedGroups();
+            setTimeout(loadBotGroups, 500);
+        }
+
+        async function removeManagedGroup(id) {
+            if (!confirm('Remover este grupo do sistema de afiliados?')) return;
+            try {
+                const res = await fetch(`/api/groups/managed/remove/${id}`, { method: 'DELETE' });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    log('✅ Grupo removido do sistema.');
+                    loadManagedGroups();
+                    setTimeout(loadBotGroups, 500);
+                } else { alert('Erro: ' + (data.message || 'desconhecido')); }
+            } catch (e) { alert('Erro: ' + e); }
+        }
+
+        // Override switchTab to load affiliate data when switching
+        const _origSwitchTab = switchTab;
+        switchTab = function (tab) {
+            _origSwitchTab(tab);
+            if (tab === 'afiliados') {
+                loadAffiliateData();
+                loadManagedGroups();
+                setTimeout(loadBotGroups, 300);
+            }
+        };
+
+        setInterval(updateStatus, 15000);
+        updateStatus();
+    </script>
+</body>
+
+</html>

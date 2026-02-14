@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dezapegão — Criar Link de Afiliado</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #0f0f0f 0%, #1a1a2e 50%, #16213e 100%);
+            color: #fff;
+        }
+
+        .bg-circle {
+            position: fixed;
+            border-radius: 50%;
+            filter: blur(80px);
+            opacity: 0.12;
+            animation: float 8s ease-in-out infinite;
+        }
+
+        .bg-circle:nth-child(1) {
+            width: 400px;
+            height: 400px;
+            background: #f7971e;
+            top: -100px;
+            right: -100px;
+        }
+
+        .bg-circle:nth-child(2) {
+            width: 300px;
+            height: 300px;
+            background: #25D366;
+            bottom: -50px;
+            left: -50px;
+            animation-delay: 3s;
+        }
+
+        @keyframes float {
+
+            0%,
+            100% {
+                transform: translate(0, 0) scale(1);
+            }
+
+            50% {
+                transform: translate(20px, -20px) scale(1.05);
+            }
+        }
+
+        .container {
+            position: relative;
+            z-index: 1;
+            max-width: 440px;
+            width: 92%;
+            padding: 40px 0;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 32px;
+        }
+
+        .logo-icon {
+            width: 70px;
+            height: 70px;
+            background: linear-gradient(135deg, #f7971e, #ffd200);
+            border-radius: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 12px;
+            font-size: 36px;
+            box-shadow: 0 6px 24px rgba(247, 151, 30, 0.3);
+        }
+
+        .header h1 {
+            font-size: 24px;
+            font-weight: 800;
+            background: linear-gradient(135deg, #f7971e, #ffd200);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .header p {
+            font-size: 14px;
+            color: rgba(255, 255, 255, 0.5);
+            margin-top: 4px;
+        }
+
+        .card {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 20px;
+            padding: 28px 24px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 13px;
+            font-weight: 600;
+            color: rgba(255, 255, 255, 0.7);
+            margin-bottom: 8px;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 14px 16px;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            color: #fff;
+            font-size: 15px;
+            font-family: 'Inter', sans-serif;
+            transition: border-color 0.3s;
+            outline: none;
+        }
+
+        .form-group input:focus {
+            border-color: rgba(247, 151, 30, 0.5);
+        }
+
+        .form-group input::placeholder {
+            color: rgba(255, 255, 255, 0.25);
+        }
+
+        .slug-preview {
+            margin-top: 8px;
+            padding: 10px 14px;
+            background: rgba(37, 211, 102, 0.08);
+            border: 1px solid rgba(37, 211, 102, 0.15);
+            border-radius: 10px;
+            font-size: 13px;
+            color: #25D366;
+            word-break: break-all;
+            font-family: monospace;
+        }
+
+        .create-btn {
+            width: 100%;
+            padding: 16px;
+            background: linear-gradient(135deg, #f7971e, #ffd200);
+            color: #000;
+            font-size: 16px;
+            font-weight: 700;
+            border: none;
+            border-radius: 14px;
+            cursor: pointer;
+            transition: all 0.3s;
+            box-shadow: 0 4px 20px rgba(247, 151, 30, 0.3);
+            font-family: 'Inter', sans-serif;
+        }
+
+        .create-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 28px rgba(247, 151, 30, 0.4);
+        }
+
+        .create-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .result {
+            margin-top: 24px;
+            padding: 20px;
+            background: rgba(37, 211, 102, 0.08);
+            border: 1px solid rgba(37, 211, 102, 0.2);
+            border-radius: 14px;
+            display: none;
+        }
+
+        .result.show {
+            display: block;
+            animation: fadeIn 0.3s;
+        }
+
+        .result.error {
+            background: rgba(255, 59, 48, 0.08);
+            border-color: rgba(255, 59, 48, 0.2);
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .result h3 {
+            font-size: 16px;
+            margin-bottom: 8px;
+            color: #25D366;
+        }
+
+        .result.error h3 {
+            color: #ff6b6b;
+        }
+
+        .result p {
+            font-size: 13px;
+            color: rgba(255, 255, 255, 0.6);
+            line-height: 1.5;
+        }
+
+        .copy-link {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 12px;
+            padding: 12px 14px;
+            background: rgba(255, 255, 255, 0.06);
+            border-radius: 10px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .copy-link:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .copy-link .url {
+            flex: 1;
+            font-size: 13px;
+            color: #25D366;
+            word-break: break-all;
+            font-family: monospace;
+        }
+
+        .copy-link .copy-btn {
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.5);
+            font-weight: 600;
+            padding: 6px 12px;
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 8px;
+            white-space: nowrap;
+        }
+
+        .ranking-link {
+            display: block;
+            text-align: center;
+            margin-top: 20px;
+            font-size: 13px;
+            color: rgba(255, 255, 255, 0.4);
+            text-decoration: none;
+        }
+
+        .ranking-link:hover {
+            color: #f7971e;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="bg-circle"></div>
+    <div class="bg-circle"></div>
+
+    <div class="container">
+        <div class="header">
+            <div class="logo-icon">🔗</div>
+            <h1>CRIAR LINK DE AFILIADO</h1>
+            <p>Convide pessoas e ganhe prêmios!</p>
+        </div>
+
+        <div class="card">
+            <div class="form-group">
+                <label>Seu nome</label>
+                <input type="text" id="name" placeholder="Ex: Maria Silva" maxlength="50">
+            </div>
+
+            <div class="form-group">
+                <label>Seu WhatsApp (com DDD)</label>
+                <input type="tel" id="phone" placeholder="Ex: 11999999999" maxlength="15">
+            </div>
+
+            <button class="create-btn" id="createBtn" onclick="createLink()">
+                CRIAR MEU LINK 🚀
+            </button>
+
+            <div class="result" id="result">
+                <h3 id="resultTitle">✅ Link criado!</h3>
+                <p id="resultMsg">Compartilhe este link e acompanhe quantas pessoas entraram.</p>
+
+                <!-- URL Display -->
+                <div
+                    style="background: rgba(0,0,0,0.3); padding: 10px; border-radius: 8px; margin: 15px 0; display: flex; align-items: center; justify-content: space-between; border: 1px solid rgba(255,255,255,0.1);">
+                    <span id="resultUrl"
+                        style="font-family: monospace; color: #25D366; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-right: 10px;"></span>
+                </div>
+
+                <!-- Action Buttons -->
+                <div style="display: flex; flex-direction: column; gap: 10px;">
+                    <button onclick="copyLink()" id="copyText"
+                        style="width: 100%; padding: 12px; background: rgba(255,255,255,0.1); border: none; border-radius: 10px; color: white; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; font-weight: 600; transition: background 0.2s;">
+                        📋 Copiar Link
+                    </button>
+
+                    <button onclick="shareWhatsApp()"
+                        style="width: 100%; padding: 12px; background: #25D366; border: none; border-radius: 10px; color: white; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; font-weight: 600; transition: background 0.2s; box-shadow: 0 4px 15px rgba(37, 211, 102, 0.3);">
+                        💬 Enviar no WhatsApp
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <a href="/ranking" class="ranking-link">📊 Ver ranking de afiliados</a>
+    </div>
+
+    <script>
+        const BASE_URL = '{{ base_url }}';
+
+        async function createLink() {
+            const name = document.getElementById('name').value.trim();
+            const phone = document.getElementById('phone').value.replace(/\D/g, '');
+
+            if (!name) {
+                showResult(false, 'Preencha seu nome.');
+                return;
+            }
+
+            const btn = document.getElementById('createBtn');
+            btn.disabled = true;
+            btn.textContent = 'Criando...';
+
+            try {
+                const resp = await fetch('/api/affiliate/create', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, phone })
+                });
+                const data = await resp.json();
+
+                if (data.status === 'success') {
+                    const link = `${BASE_URL}/entrar/${data.slug}`;
+                    document.getElementById('resultUrl').textContent = link;
+                    showResult(true, 'Compartilhe este link e acompanhe quantas pessoas entraram!');
+                } else {
+                    showResult(false, data.message || 'Erro ao criar link.');
+                }
+            } catch (e) {
+                showResult(false, 'Erro de conexão. Tente novamente.');
+            }
+
+            btn.disabled = false;
+            btn.textContent = 'CRIAR MEU LINK 🚀';
+        }
+
+        function showResult(success, msg) {
+            const el = document.getElementById('result');
+            const title = document.getElementById('resultTitle');
+            const msgEl = document.getElementById('resultMsg');
+
+            el.classList.add('show');
+            el.classList.toggle('error', !success);
+            title.textContent = success ? '✅ Link criado!' : '❌ Erro';
+            msgEl.textContent = msg;
+
+            const successContent = document.getElementById('successContent');
+            if (successContent) {
+                successContent.style.display = success ? 'block' : 'none';
+            }
+        }
+
+        async function copyLink() {
+            const link = document.getElementById('resultUrl').textContent;
+            const text = `🚨 ATENÇÃO HELIÓPOLIS 🚨
+
+O MAIOR ENCONTRO
+DE DESAPEGOS É HOJE.
++500 CONFIRMADOS.
+
+UM SÓ LUGAR PARA:
+COMPRAR | VENDER | DOAR
+Link abaixo 👇
+${link}`;
+
+            try {
+                await navigator.clipboard.writeText(text);
+                const btn = document.getElementById('copyText');
+                const originalText = btn.textContent;
+                btn.textContent = '✅ Copiado!';
+                setTimeout(() => { btn.textContent = originalText; }, 2000);
+            } catch (err) {
+                console.error('Falha ao copiar:', err);
+                prompt('Copie o texto abaixo:', text);
+            }
+        }
+
+        function shareWhatsApp() {
+            const link = document.getElementById('resultUrl').textContent;
+            const text = `🚨 ATENÇÃO HELIÓPOLIS 🚨
+
+O MAIOR ENCONTRO
+DE DESAPEGOS É HOJE.
++500 CONFIRMADOS.
+
+UM SÓ LUGAR PARA:
+COMPRAR | VENDER | DOAR
+Link abaixo 👇
+${link}`;
+            window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
+        }
+    </script>
+</body>
+
+</html>

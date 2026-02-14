@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dezapegão — Ranking de Afiliados</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #0f0f0f 0%, #1a1a2e 50%, #16213e 100%);
+            color: #fff;
+            padding: 24px 16px;
+        }
+
+        .bg-circle {
+            position: fixed;
+            border-radius: 50%;
+            filter: blur(80px);
+            opacity: 0.1;
+            animation: float 8s ease-in-out infinite;
+            pointer-events: none;
+        }
+
+        .bg-circle:nth-child(1) {
+            width: 400px;
+            height: 400px;
+            background: #ffd200;
+            top: -100px;
+            left: -100px;
+        }
+
+        .bg-circle:nth-child(2) {
+            width: 300px;
+            height: 300px;
+            background: #25D366;
+            bottom: -50px;
+            right: -50px;
+            animation-delay: 3s;
+        }
+
+        @keyframes float {
+
+            0%,
+            100% {
+                transform: translate(0, 0) scale(1);
+            }
+
+            50% {
+                transform: translate(20px, -20px) scale(1.05);
+            }
+        }
+
+        .container {
+            max-width: 500px;
+            margin: 0 auto;
+            position: relative;
+            z-index: 1;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 32px;
+        }
+
+        .header h1 {
+            font-size: 28px;
+            font-weight: 900;
+            background: linear-gradient(135deg, #ffd200, #f7971e);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .header p {
+            font-size: 14px;
+            color: rgba(255, 255, 255, 0.5);
+            margin-top: 4px;
+        }
+
+        /* --- PODIUM --- */
+        .podium {
+            display: flex;
+            align-items: flex-end;
+            justify-content: center;
+            gap: 8px;
+            margin-bottom: 24px;
+        }
+
+        .podium-item {
+            flex: 1;
+            max-width: 130px;
+            text-align: center;
+            border-radius: 16px;
+            overflow: hidden;
+        }
+
+        .podium-item .avatar {
+            width: 52px;
+            height: 52px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            margin: 0 auto 8px;
+            font-weight: 800;
+        }
+
+        .podium-item .name {
+            font-size: 13px;
+            font-weight: 700;
+            margin-bottom: 4px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            padding: 0 8px;
+        }
+
+        .podium-item .count {
+            font-size: 20px;
+            font-weight: 900;
+            color: #25D366;
+        }
+
+        .podium-item .label {
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.5);
+        }
+
+        .podium-item .prize {
+            font-size: 12px;
+            font-weight: 800;
+            margin-top: 4px;
+            padding: 3px 8px;
+            border-radius: 6px;
+            display: inline-block;
+        }
+
+        .podium-item .bar {
+            padding: 12px 8px;
+            border-radius: 12px 12px 0 0;
+            margin-top: 8px;
+        }
+
+        .p1 .avatar {
+            background: linear-gradient(135deg, #ffd200, #f7971e);
+            color: #000;
+        }
+
+        .p1 .bar {
+            background: linear-gradient(180deg, rgba(255, 210, 0, 0.2), rgba(255, 210, 0, 0.05));
+            min-height: 120px;
+            border: 1px solid rgba(255, 210, 0, 0.2);
+        }
+
+        .p1 .prize {
+            background: rgba(255, 210, 0, 0.15);
+            color: #ffd200;
+        }
+
+        .p2 .avatar {
+            background: linear-gradient(135deg, #c0c0c0, #e8e8e8);
+            color: #333;
+        }
+
+        .p2 .bar {
+            background: linear-gradient(180deg, rgba(192, 192, 192, 0.15), rgba(192, 192, 192, 0.03));
+            min-height: 90px;
+            border: 1px solid rgba(192, 192, 192, 0.15);
+        }
+
+        .p2 .prize {
+            background: rgba(192, 192, 192, 0.15);
+            color: #c0c0c0;
+        }
+
+        .p3 .avatar {
+            background: linear-gradient(135deg, #cd7f32, #e8a850);
+            color: #fff;
+        }
+
+        .p3 .bar {
+            background: linear-gradient(180deg, rgba(205, 127, 50, 0.15), rgba(205, 127, 50, 0.03));
+            min-height: 70px;
+            border: 1px solid rgba(205, 127, 50, 0.15);
+        }
+
+        .p3 .prize {
+            background: rgba(205, 127, 50, 0.15);
+            color: #cd7f32;
+        }
+
+        /* --- CTA BUTTON --- */
+        .cta-wrap {
+            text-align: center;
+            margin: 24px 0;
+        }
+
+        .cta-btn {
+            display: inline-block;
+            background: linear-gradient(135deg, #25D366, #128C7E);
+            color: #fff;
+            font-weight: 700;
+            font-size: 15px;
+            padding: 14px 32px;
+            border-radius: 14px;
+            text-decoration: none;
+            letter-spacing: 0.5px;
+            box-shadow: 0 4px 20px rgba(37, 211, 102, 0.3);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .cta-btn:hover {
+            transform: scale(1.05);
+            box-shadow: 0 6px 25px rgba(37, 211, 102, 0.4);
+        }
+
+        /* --- ACCORDION --- */
+        .accordion-header {
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 16px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: 14px;
+            transition: background 0.2s;
+        }
+
+        .accordion-header:hover {
+            background: rgba(255, 255, 255, 0.06);
+        }
+
+        .accordion-header span {
+            font-size: 14px;
+            font-weight: 600;
+            color: #aaa;
+        }
+
+        .accordion-arrow {
+            font-size: 12px;
+            color: #666;
+            transition: transform 0.3s;
+        }
+
+        .accordion-body {
+            display: none;
+            padding: 8px 0;
+        }
+
+        .accordion-body.open {
+            display: block;
+        }
+
+        /* --- LIST --- */
+        .list-item {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            padding: 14px 16px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: 14px;
+            margin-bottom: 8px;
+            transition: background 0.2s;
+        }
+
+        .list-item:hover {
+            background: rgba(255, 255, 255, 0.06);
+        }
+
+        .rank {
+            width: 28px;
+            font-size: 15px;
+            font-weight: 700;
+            color: rgba(255, 255, 255, 0.4);
+            text-align: center;
+        }
+
+        .info {
+            flex: 1;
+        }
+
+        .info .n {
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .info .sub {
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.4);
+        }
+
+        .score {
+            font-size: 18px;
+            font-weight: 800;
+            color: #25D366;
+        }
+
+        .empty {
+            text-align: center;
+            padding: 40px;
+            color: rgba(255, 255, 255, 0.4);
+            font-size: 14px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="bg-circle"></div>
+    <div class="bg-circle"></div>
+
+    <div class="container">
+        <div class="header">
+            <h1>🏆 RANKING DE AFILIADOS</h1>
+            <p>Quem mais trouxe membros para o grupo</p>
+        </div>
+
+        <!-- PODIUM: TOP 3 -->
+        {% if top3|length > 0 %}
+        <div class="podium">
+            {% if top3|length > 1 %}
+            <div class="podium-item p2">
+                <div class="avatar">2</div>
+                <div class="name">{{ top3[1].name }}</div>
+                <div class="bar">
+                    <div class="prize">🏅 {{ prizes[1] }}</div>
+                </div>
+            </div>
+            {% endif %}
+
+            {% if top3|length > 0 %}
+            <div class="podium-item p1">
+                <div class="avatar">1</div>
+                <div class="name">{{ top3[0].name }}</div>
+                <div class="bar">
+                    <div class="prize">🏅 {{ prizes[0] }}</div>
+                </div>
+            </div>
+            {% endif %}
+
+            {% if top3|length > 2 %}
+            <div class="podium-item p3">
+                <div class="avatar">3</div>
+                <div class="name">{{ top3[2].name }}</div>
+                <div class="bar">
+                    <div class="prize">🏅 {{ prizes[2] }}</div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        <!-- CTA BUTTON -->
+        <div class="cta-wrap">
+            <a href="/criar-link" class="cta-btn">🔗 Criar meu link de afiliado</a>
+        </div>
+
+        <!-- ACCORDION: 4º a 10º -->
+        {% if rest|length > 0 %}
+        <div>
+            <div class="accordion-header" onclick="toggleAccordion()">
+                <span>📊 Ver posições 4º a 10º</span>
+                <span class="accordion-arrow" id="acc-arrow">▼</span>
+            </div>
+            <div class="accordion-body" id="acc-body">
+                {% for item in rest %}
+                <div class="list-item">
+                    <span class="rank">{{ item.rank }}º</span>
+                    <div class="info">
+                        <div class="n">{{ item.name }}</div>
+                    </div>
+                </div>
+                {% endfor %}
+
+                {% if full_rest|length > 0 %}
+                <div style="text-align:center;margin:16px 0 8px;">
+                    <button onclick="showFullList()" id="btn-full-list"
+                        style="background:linear-gradient(135deg,rgba(255,255,255,0.08),rgba(255,255,255,0.03));border:1px solid rgba(255,255,255,0.1);color:#25D366;font-weight:700;font-size:13px;padding:10px 24px;border-radius:10px;cursor:pointer;transition:all 0.2s;"
+                        onmouseover="this.style.background='rgba(37,211,102,0.1)'"
+                        onmouseout="this.style.background='linear-gradient(135deg,rgba(255,255,255,0.08),rgba(255,255,255,0.03))'">📋
+                        Ver lista completa ({{ full_rest|length }} mais)</button>
+                </div>
+                <div id="full-list" style="display:none;">
+                    {% for item in full_rest %}
+                    <div class="list-item">
+                        <span class="rank">{{ item.rank }}º</span>
+                        <div class="info">
+                            <div class="n">{{ item.name }}</div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        {% elif top3|length == 0 %}
+        <div class="empty">
+            <p>Nenhum afiliado cadastrado ainda.</p>
+            <p style="margin-top:8px">Seja o primeiro!</p>
+        </div>
+        {% endif %}
+    </div>
+
+    <script>
+        function toggleAccordion() {
+            const body = document.getElementById('acc-body');
+            const arrow = document.getElementById('acc-arrow');
+            if (body.classList.contains('open')) {
+                body.classList.remove('open');
+                arrow.style.transform = 'rotate(0deg)';
+            } else {
+                body.classList.add('open');
+                arrow.style.transform = 'rotate(180deg)';
+            }
+        }
+
+        function showFullList() {
+            document.getElementById('full-list').style.display = 'block';
+            document.getElementById('btn-full-list').style.display = 'none';
+        }
+    </script>
+</body>
+
+</html>
