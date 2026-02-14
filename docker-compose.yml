@@ -1,34 +1,12 @@
 version: '3.8'
 
 services:
-  wppserver:
-    image: wppconnect-team/wppconnect-server:latest
-    container_name: wppserver
-    restart: always
-    ports:
-      - "21465:21465"
-    environment:
-      - PORT=21465
-      - HOST=0.0.0.0
-      - WHATSAPP_DEFAULT_ENGINE=chromium
-    volumes:
-      # Map local folders to container specific paths for persistence
-      # On Railway, you should mount volumes to these container paths
-      - ./wpp_tokens:/usr/src/wpp-server/tokens
-      - ./wpp_data:/usr/src/wpp-server/userData
-
   bot:
     build: .
     container_name: idsr_bot
     restart: always
     ports:
       - "8000:8000"
-    depends_on:
-      - wppserver
-    environment:
-      - WPP_SERVER_URL=http://wppserver:21465
-      - SESSION_NAME=idsr_bot
-      # Database persists in /data
     volumes:
       # Map local ./bot_data to /data inside container
       # On Railway, mount a Volume to /data for this service

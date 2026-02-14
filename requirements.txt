@@ -5,3 +5,5 @@ sqlalchemy
 apscheduler
 python-multipart
 requests
+jinja2
+python-multipart
