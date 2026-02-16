@@ -561,6 +561,49 @@ async def job_close_groups():
                  await client.post(f"{WPP_SERVER_URL}/api/{SESSION_NAME}/groups/settings/property", 
                                    json={"id": gid, "property": "announcement", "value": True})
 
+async def job_sync_invite_links():
+    """Periodically check and update invite links for all managed groups.
+    When a group link is revoked/reset in WhatsApp, this job detects the change
+    and updates the database so affiliate links and landing pages keep working."""
+    try:
+        # Check session first (same pattern as watchdog)
+        status = await wpp.check_session_status()
+        if not status.get("connected"):
+            logger.info("INVITE_LINK_SYNC: Session not connected, skipping.")
+            return
+
+        db = SessionLocal()
+        try:
+            groups = db.query(WhatsAppGroup).all()
+            if not groups:
+                return
+
+            updated = 0
+            for g in groups:
+                try:
+                    live_link = await wpp.get_group_invite_link(g.group_jid)
+                    if not live_link:
+                        continue
+                    if live_link != g.invite_link:
+                        old_link = g.invite_link or "(vazio)"
+                        g.invite_link = live_link
+                        updated += 1
+                        logger.info(f"INVITE_LINK_UPDATED: {g.name} | old={old_link[:40]} -> new={live_link[:40]}")
+                except Exception as e:
+                    logger.warning(f"INVITE_LINK_SYNC: Error checking {g.name}: {e}")
+                # Small delay between groups to avoid API rate limits
+                await asyncio.sleep(2)
+
+            if updated > 0:
+                db.commit()
+                logger.info(f"INVITE_LINK_SYNC: {updated} link(s) updated out of {len(groups)} groups.")
+            else:
+                logger.info(f"INVITE_LINK_SYNC: All {len(groups)} links up to date.")
+        finally:
+            db.close()
+    except Exception as e:
+        logger.error(f"INVITE_LINK_SYNC: Error: {e}")
+
 # --- FASTAPI APP & LIFESPAN ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -576,8 +619,9 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(job_open_groups, 'cron', hour=10, minute=0)
     scheduler.add_job(job_close_groups, 'cron', hour=20, minute=0)
     scheduler.add_job(job_watchdog, 'interval', minutes=5, id='watchdog')
+    scheduler.add_job(job_sync_invite_links, 'interval', minutes=10, id='sync_invite_links')
     scheduler.start()
-    logger.info("Scheduler started with watchdog (every 5 min)")
+    logger.info("Scheduler started with watchdog (every 5 min) + invite link sync (every 10 min)")
     
     async def startup_sequence():
         await wpp.start_session()
