@@ -1576,6 +1576,21 @@ async def api_managed_groups_remove(group_id: int, username: str = Depends(get_c
     finally:
         db.close()
 
+@app.post("/api/groups/sync-links")
+async def api_sync_invite_links(username: str = Depends(get_current_username)):
+    """Force immediate sync of all group invite links."""
+    await job_sync_invite_links()
+    # Return updated groups
+    db = SessionLocal()
+    try:
+        groups = db.query(WhatsAppGroup).all()
+        return {"status": "success", "groups": [
+            {"name": g.name, "invite_link": g.invite_link, "group_jid": g.group_jid}
+            for g in groups
+        ]}
+    finally:
+        db.close()
+
 # --- Bot: Handle participant changes (join/leave) ---
 async def handle_participant_change(data: dict):
     """Process onparticipantschanged webhook to confirm affiliate joins and update member counts."""
