@@ -2124,11 +2124,7 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
                 flood_action = cfg.get("flood_action", "delete")
                 
                 # Mensagem padrão para todas as infrações
-                warn_msg = (
-                    "🚨 Mensagem Apagada 🚨\n"
-                    "Veja as regras do grupo Link: 👇\n"
-                    "https://whatsapp.com/channel/0029Vb5hI9O9mrGlvkWms21P/160"
-                )
+                warn_msg = "🤖 Regras na descrição."
                 
                 # Se for violação de texto longo, usar delete_warn para garantir que o aviso chegue
                 if reason == "text_length":
