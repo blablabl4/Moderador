@@ -1156,6 +1156,58 @@ def page_home(request: Request):
     finally:
         db.close()
 
+# --- AUTO-REDIRECTOR (no-click invite) ---
+@app.get("/r", response_class=HTMLResponse)
+def page_redirect(request: Request):
+    """Auto-redirect to group — no click needed, no affiliate."""
+    db = SessionLocal()
+    try:
+        group = db.query(WhatsAppGroup).filter(
+            WhatsAppGroup.is_active == True
+        ).order_by(WhatsAppGroup.current_members.asc()).first()
+
+        if not group:
+            return templates.TemplateResponse("redirecionar.html", {
+                "request": request,
+                "error": "Todos os grupos estão lotados no momento. Tente novamente mais tarde.",
+                "invite_link": None
+            })
+
+        # Dedup by IP
+        visitor_ip = request.client.host if request.client else ""
+        recent_cutoff = datetime.utcnow() - timedelta(hours=1)
+        existing_click = db.query(JoinTracking).filter(
+            JoinTracking.affiliate_id == None,
+            JoinTracking.group_id == group.id,
+            JoinTracking.visitor_ip == visitor_ip,
+            JoinTracking.confirmed == False,
+            JoinTracking.clicked_at >= recent_cutoff
+        ).first() if visitor_ip else None
+
+        if not existing_click:
+            tracking = JoinTracking(
+                affiliate_id=None,
+                group_id=group.id,
+                visitor_ip=visitor_ip
+            )
+            db.add(tracking)
+            db.commit()
+            logger.info(f"REDIRECT_CLICK: group={group.name} ({group.current_members}/{group.max_members}), ip={visitor_ip[:15]}")
+
+        return templates.TemplateResponse("redirecionar.html", {
+            "request": request,
+            "error": None,
+            "invite_link": group.invite_link
+        })
+    except Exception as e:
+        logger.error(f"REDIRECT_ERROR: {e}")
+        return templates.TemplateResponse("redirecionar.html", {
+            "request": request, "error": "Erro interno. Tente novamente.",
+            "invite_link": None
+        })
+    finally:
+        db.close()
+
 # --- AFFILIATE SYSTEM ---
 BASE_URL = "https://www.dezapegao.com.br"
 
