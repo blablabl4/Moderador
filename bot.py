@@ -719,7 +719,7 @@ async def job_exclusive_cleanup():
                                     raw_id = str(m)
                                 if phone not in phone_groups:
                                     phone_groups[phone] = []
-                                phone_groups[phone].append((g.group_jid, g.group_name or g.group_jid[:20], raw_id))
+                                phone_groups[phone].append((g.group_jid, g.name or g.group_jid[:20], raw_id))
                 except Exception as e:
                     logger.error(f"EXCLUSIVE_JOB: error fetching {g.group_jid[:20]}: {e}")
 
@@ -766,10 +766,10 @@ async def job_exclusive_cleanup():
                             await wpp.reject_participant(g.group_jid, req_id)
                             rejected_count += 1
                             _exclusivity_report["rejected_requests"].append({
-                                "phone": req_phone, "group": g.group_name or g.group_jid[:20],
+                                "phone": req_phone, "group": g.name or g.group_jid[:20],
                                 "time": datetime.now().strftime("%H:%M")
                             })
-                            logger.info(f"EXCLUSIVE_JOB: rejected pending {req_phone} from {g.group_name}")
+                            logger.info(f"EXCLUSIVE_JOB: rejected pending {req_phone} from {g.name}")
                 except Exception as e:
                     logger.error(f"EXCLUSIVE_JOB: pending scan error for {g.group_jid[:20]}: {e}")
 
@@ -1718,8 +1718,8 @@ async def api_clean_duplicates(username: str = Depends(get_current_username)):
             try:
                 members_raw = await wpp.get_group_participants(g.group_jid)
                 member_count = len(members_raw) if isinstance(members_raw, list) else 0
-                debug_groups.append({"name": g.group_name or g.group_jid[:20], "members": member_count})
-                logger.info(f"CLEAN_DUP: group={g.group_name}, jid={g.group_jid[:20]}, members={member_count}")
+                debug_groups.append({"name": g.name or g.group_jid[:20], "members": member_count})
+                logger.info(f"CLEAN_DUP: group={g.name}, jid={g.group_jid[:20]}, members={member_count}")
                 if isinstance(members_raw, list):
                     for m in members_raw:
                         phone = extract_phone(m)
@@ -1735,10 +1735,10 @@ async def api_clean_duplicates(username: str = Depends(get_current_username)):
                                 raw_id = str(m)
                             if phone not in phone_groups:
                                 phone_groups[phone] = []
-                            phone_groups[phone].append((g.group_jid, g.group_name or g.group_jid[:20], raw_id))
+                            phone_groups[phone].append((g.group_jid, g.name or g.group_jid[:20], raw_id))
             except Exception as e:
                 logger.error(f"Clean duplicates: error fetching {g.group_jid}: {e}")
-                debug_groups.append({"name": g.group_name or g.group_jid[:20], "error": str(e)})
+                debug_groups.append({"name": g.name or g.group_jid[:20], "error": str(e)})
 
         # Find duplicates (in 2+ groups)
         duplicates = {phone: groups for phone, groups in phone_groups.items() if len(groups) >= 2}
@@ -1799,9 +1799,9 @@ async def api_group_members_list(username: str = Depends(get_current_username)):
                             phones.append(str(mid).split('@')[0])
                         else:
                             phones.append(str(m).split('@')[0])
-                result.append({"name": g.group_name or g.group_jid[:20], "jid": g.group_jid, "members": phones, "count": len(phones)})
+                result.append({"name": g.name or g.group_jid[:20], "jid": g.group_jid, "members": phones, "count": len(phones)})
             except Exception as e:
-                result.append({"name": g.group_name or g.group_jid[:20], "jid": g.group_jid, "error": str(e), "count": 0})
+                result.append({"name": g.name or g.group_jid[:20], "jid": g.group_jid, "error": str(e), "count": 0})
         return {"groups": result}
     finally:
         db.close()
@@ -1827,9 +1827,9 @@ async def api_pending_requests(username: str = Depends(get_current_username)):
                             pending.append({"id": str(req_id), "phone": str(req_id).split('@')[0]})
                         else:
                             pending.append({"id": str(req), "phone": str(req).split('@')[0]})
-                result.append({"name": g.group_name or g.group_jid[:20], "jid": g.group_jid, "pending": pending, "count": len(pending)})
+                result.append({"name": g.name or g.group_jid[:20], "jid": g.group_jid, "pending": pending, "count": len(pending)})
             except Exception as e:
-                result.append({"name": g.group_name or g.group_jid[:20], "error": str(e), "count": 0})
+                result.append({"name": g.name or g.group_jid[:20], "error": str(e), "count": 0})
         return {"groups": result}
     finally:
         db.close()
