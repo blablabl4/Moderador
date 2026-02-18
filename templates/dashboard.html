@@ -659,7 +659,7 @@
             <button class="tab-btn active" onclick="switchTab('painel')">📡 Painel</button>
             <button class="tab-btn" onclick="switchTab('grupos')">👥 Grupos</button>
             <button class="tab-btn" onclick="switchTab('varredura')">🔍 Varredura</button>
-            <button class="tab-btn" onclick="switchTab('afiliados')">🔗 Afiliados</button>
+            <button class="tab-btn" onclick="switchTab('afiliados')">🔀 Redirecionador</button>
             <button class="tab-btn" onclick="switchTab('config')">⚙️ Configurações</button>
         </div>
 
@@ -935,45 +935,46 @@
             </div>
         </div>
 
-        <!-- TAB: AFILIADOS -->
+        <!-- TAB: REDIRECIONADOR -->
         <div id="tab-afiliados" class="tab-content">
             <!-- Stats -->
             <div class="grid-2">
                 <div class="card">
-                    <div class="card-title">📊 Resumo do Sistema</div>
+                    <div class="card-title">📊 Dados do Redirecionador</div>
                     <div class="card-body">
                         <div class="status-row">
-                            <span class="status-label">Total de Afiliados</span>
-                            <span class="status-value" id="aff-total" style="color:#25D366;">...</span>
-                        </div>
-                        <div class="status-row">
-                            <span class="status-label">Cliques Totais</span>
+                            <span class="status-label">Total de Acessos</span>
                             <span class="status-value" id="aff-clicks" style="color:#f5a623;">...</span>
                         </div>
                         <div class="status-row">
                             <span class="status-label">Entradas Confirmadas</span>
-                            <span class="status-value" id="aff-confirmed" style="color:#e94560;">...</span>
+                            <span class="status-value" id="aff-confirmed" style="color:#25D366;">...</span>
                         </div>
                     </div>
                 </div>
                 <div class="card">
-                    <div class="card-title">🔗 Links Rápidos</div>
+                    <div class="card-title">🔗 Link do Redirecionador</div>
                     <div class="card-body">
-                        <a href="/criar-link" target="_blank" class="btn btn-green"
-                            style="text-decoration:none;text-align:center;margin-bottom:8px;">📝 Criar Link de
-                            Afiliado</a>
-                        <a href="/ranking" target="_blank" class="btn btn-outline"
-                            style="text-decoration:none;text-align:center;">🏆 Ver Ranking Público</a>
+                        <div
+                            style="background:rgba(0,0,0,0.3);border:1px solid #2a2a4a;border-radius:10px;padding:14px;display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+                            <span style="flex:1;font-size:14px;font-weight:600;color:#25D366;word-break:break-all;"
+                                id="redirect-link">https://www.dezapegao.com.br/r</span>
+                            <button onclick="copyRedirectLink()" class="btn btn-green"
+                                style="width:auto;margin:0;padding:8px 16px;font-size:12px;white-space:nowrap;">📋
+                                Copiar</button>
+                        </div>
+                        <p style="color:#888;font-size:12px;line-height:1.5;">Compartilhe este link — a pessoa será
+                            redirecionada automaticamente para o grupo com mais vagas disponíveis.</p>
                     </div>
                 </div>
             </div>
 
             <!-- Managed Groups -->
             <div class="card">
-                <div class="card-title">📱 Grupos no Sistema de Afiliados</div>
+                <div class="card-title">📱 Grupos no Redirecionador</div>
                 <div class="card-body">
                     <p style="color:#888;font-size:12px;margin-bottom:12px;">Selecione quais grupos do bot serão usados
-                        para receber membros via links de afiliados.</p>
+                        para receber membros via redirecionamento.</p>
 
                     <div
                         style="font-size:12px;font-weight:600;color:#25D366;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px;">
@@ -1001,15 +1002,6 @@
                 </div>
             </div>
 
-            <!-- Ranking -->
-            <div class="card">
-                <div class="card-title">🏆 Top Afiliados</div>
-                <div class="card-body">
-                    <div id="aff-ranking-list">
-                        <div style="color:#666;padding:8px;">⏳ Carregando ranking...</div>
-                    </div>
-                </div>
-            </div>
         </div>
     </div>
 
@@ -1331,34 +1323,25 @@
         }
 
 
-        // --- AFFILIATE SYSTEM ---
-        async function loadAffiliateData() {
+        // --- REDIRECTOR SYSTEM ---
+        function copyRedirectLink() {
+            const link = document.getElementById('redirect-link').textContent;
+            navigator.clipboard.writeText(link).then(() => {
+                log('📋 Link copiado: ' + link);
+                const btn = event.target;
+                const orig = btn.textContent;
+                btn.textContent = '✅ Copiado!';
+                setTimeout(() => btn.textContent = orig, 2000);
+            });
+        }
+
+        async function loadRedirectorData() {
             try {
                 const res = await fetch('/api/affiliate/stats');
                 const data = await res.json();
-                document.getElementById('aff-total').textContent = data.total_affiliates;
                 document.getElementById('aff-clicks').textContent = data.total_clicks;
                 document.getElementById('aff-confirmed').textContent = data.total_confirmed;
-
-                const list = document.getElementById('aff-ranking-list');
-                if (data.ranking && data.ranking.length > 0) {
-                    list.innerHTML = data.ranking.map((r, i) => `
-                        <div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid #1a1a2e;">
-                            <span style="width:28px;text-align:center;font-weight:700;color:${i < 3 ? '#ffd200' : '#555'};">${i + 1}º</span>
-                            <div style="flex:1;">
-                                <div style="font-size:14px;font-weight:600;">${r.name}</div>
-                                <div style="font-size:11px;color:#666;">/entrar/${r.slug}</div>
-                            </div>
-                            <div style="text-align:right;">
-                                <div style="font-size:16px;font-weight:800;color:#25D366;">${r.confirmed}</div>
-                                <div style="font-size:10px;color:#888;">${r.confirmed === 1 ? 'entrada' : 'entradas'}</div>
-                            </div>
-                        </div>
-                    `).join('');
-                } else {
-                    list.innerHTML = '<div style="color:#666;padding:12px;text-align:center;">Nenhum afiliado cadastrado ainda.</div>';
-                }
-            } catch (e) { console.error('Affiliate stats error:', e); }
+            } catch (e) { console.error('Redirector stats error:', e); }
         }
 
         let _managedJids = new Set();
@@ -1435,13 +1418,13 @@
                     if (data.status === 'success') added++;
                 } catch (e) { console.error(e); }
             }
-            log(`✅ ${added} grupo(s) adicionados ao sistema de afiliados`);
+            log(`✅ ${added} grupo(s) adicionados ao redirecionador`);
             loadManagedGroups();
             setTimeout(loadBotGroups, 500);
         }
 
         async function removeManagedGroup(id) {
-            if (!confirm('Remover este grupo do sistema de afiliados?')) return;
+            if (!confirm('Remover este grupo do redirecionador?')) return;
             try {
                 const res = await fetch(`/api/groups/managed/remove/${id}`, { method: 'DELETE' });
                 const data = await res.json();
@@ -1458,7 +1441,7 @@
         switchTab = function (tab) {
             _origSwitchTab(tab);
             if (tab === 'afiliados') {
-                loadAffiliateData();
+                loadRedirectorData();
                 loadManagedGroups();
                 setTimeout(loadBotGroups, 300);
             }
