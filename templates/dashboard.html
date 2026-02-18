@@ -960,14 +960,6 @@
                                 <span class="status-value" id="redir-duplicates" style="color:#e94560;">...</span>
                             </div>
                         </div>
-                        <button onclick="checkDuplicates()" class="btn btn-green"
-                            style="width:100%;margin-top:12px;font-size:12px;">🔍 Verificar Duplicatas</button>
-                        <button onclick="scanPendingRequests()" class="btn btn-green"
-                            style="width:100%;margin-top:8px;font-size:12px;background:#e94560;">🔄 Varrer Solicitações
-                            Pendentes</button>
-                        <div id="duplicates-detail"
-                            style="display:none;margin-top:12px;max-height:300px;overflow-y:auto;background:rgba(0,0,0,0.2);border-radius:8px;padding:10px;">
-                        </div>
                     </div>
                 </div>
                 <div class="card">
@@ -1025,8 +1017,8 @@
                 <div class="card-title">🚫 Controle de Exclusividade</div>
                 <div class="card-body">
                     <p style="color:#888;font-size:12px;margin-bottom:16px;">Impede que um membro esteja em mais de um
-                        grupo ao mesmo tempo. O bot verifica duplicatas na solicitação de entrada e também após a
-                        entrada como segurança.</p>
+                        grupo ao mesmo tempo. O bot rejeita a solicitação de entrada e remove quem entrar em duplicata.
+                    </p>
 
                     <div class="setting-row">
                         <div class="setting-label">Exclusividade ativa<small>Liga/desliga a verificação de membros
@@ -1034,22 +1026,20 @@
                         <label class="setting-toggle"><input type="checkbox" id="redir-exclusive-enabled" checked><span
                                 class="toggle-slider"></span></label>
                     </div>
-                    <div class="setting-row">
-                        <div class="setting-label">Mensagem de rejeição<small>Enviada no privado quando a solicitação é
-                                recusada (pré-entrada)</small></div>
-                        <input type="text" class="setting-input setting-input-wide" id="redir-reject-msg"
-                            value="❌ Sua solicitação foi recusada pois você já faz parte de um dos nossos grupos. Não é permitido estar em mais de um grupo ao mesmo tempo.">
+                    <div style="margin-top:12px;text-align:center;">
+                        <button class="btn-save" onclick="saveExclusivitySettings()">💾 Salvar</button>
+                        <div class="save-feedback" id="excl-save-feedback">✅ Configurações salvas!</div>
                     </div>
-                    <div class="setting-row">
-                        <div class="setting-label">Mensagem de remoção<small>Enviada no privado quando removido depois
-                                de entrar (pós-entrada)</small></div>
-                        <input type="text" class="setting-input setting-input-wide" id="redir-remove-msg"
-                            value="⚠️ Você já faz parte de um dos nossos grupos! Não é permitido estar em mais de um grupo ao mesmo tempo. Você foi removido do grupo que acabou de entrar.">
-                    </div>
-                    <div style="margin-top:16px;text-align:center;">
-                        <button class="btn-save" onclick="saveExclusivitySettings()">💾 Salvar Exclusividade</button>
-                        <div class="save-feedback" id="excl-save-feedback">✅ Configurações de exclusividade salvas!
-                        </div>
+
+                    <hr style="border-color:#2a2a4a;margin:16px 0;">
+
+                    <button onclick="checkDuplicates()" class="btn btn-green" style="width:100%;font-size:12px;">🔍
+                        Verificar Duplicatas</button>
+                    <button onclick="scanPendingRequests()" class="btn btn-green"
+                        style="width:100%;margin-top:8px;font-size:12px;background:#e94560;">🔄 Varrer Solicitações
+                        Pendentes</button>
+                    <div id="exclusivity-results"
+                        style="margin-top:12px;max-height:400px;overflow-y:auto;background:rgba(0,0,0,0.2);border-radius:8px;padding:10px;display:none;">
                     </div>
                 </div>
             </div>
@@ -1410,12 +1400,6 @@
                 const sRes = await fetch('/api/settings');
                 const settings = await sRes.json();
                 document.getElementById('redir-exclusive-enabled').checked = settings.exclusive_groups_enabled !== false;
-                if (settings.exclusive_reject_message) {
-                    document.getElementById('redir-reject-msg').value = settings.exclusive_reject_message;
-                }
-                if (settings.exclusive_remove_message) {
-                    document.getElementById('redir-remove-msg').value = settings.exclusive_remove_message;
-                }
             } catch (e) { console.error('Exclusivity settings load error:', e); }
         }
 
@@ -1424,7 +1408,7 @@
             const origText = btn.textContent;
             btn.textContent = '⏳ Verificando...';
             btn.disabled = true;
-            const detail = document.getElementById('duplicates-detail');
+            const detail = document.getElementById('exclusivity-results');
 
             try {
                 const res = await fetch('/api/admin/group-duplicates');
@@ -1450,6 +1434,7 @@
                         html += `</div>`;
                     }
                     html += '</div>';
+                    html += `<button onclick="cleanDuplicates()" class="btn btn-green" style="width:100%;margin-top:12px;font-size:12px;background:#ff6b35;">🧹 Limpar Duplicados (remover dos grupos extras)</button>`;
                     detail.innerHTML = html;
                 }
                 detail.style.display = 'block';
@@ -1462,15 +1447,60 @@
             }
         }
 
+        async function cleanDuplicates() {
+            const btn = event.target;
+            const origText = btn.textContent;
+            btn.textContent = '⏳ Limpando...';
+            btn.disabled = true;
+
+            try {
+                const res = await fetch('/api/admin/clean-duplicates', { method: 'POST' });
+                const data = await res.json();
+                const detail = document.getElementById('exclusivity-results');
+
+                if (data.error) {
+                    detail.innerHTML += `<p style="color:#e94560;margin-top:8px;">Erro: ${data.error}</p>`;
+                    return;
+                }
+
+                let html = `<hr style="border-color:#2a2a4a;margin:12px 0;">`;
+                html += `<p style="color:#ff6b35;font-size:13px;margin-bottom:8px;">🧹 Resultado da limpeza:</p>`;
+                html += `<p style="font-size:12px;color:#888;margin-bottom:8px;">${data.removed.length} removido(s) | ${data.failed.length} falha(s)</p>`;
+
+                for (const r of data.removed) {
+                    html += `<div style="padding:4px 8px;margin-bottom:3px;background:rgba(255,107,53,0.1);border-radius:4px;font-size:11px;">`;
+                    html += `✅ ${r.phone} removido de ${r.removed_from}`;
+                    html += `</div>`;
+                }
+                for (const f of data.failed) {
+                    html += `<div style="padding:4px 8px;margin-bottom:3px;background:rgba(233,69,96,0.1);border-radius:4px;font-size:11px;">`;
+                    html += `❌ ${f.phone} falhou em ${f.group}: ${f.error || 'erro'}`;
+                    html += `</div>`;
+                }
+
+                detail.innerHTML += html;
+            } catch (e) {
+                alert('Erro na limpeza: ' + e);
+            } finally {
+                btn.textContent = origText;
+                btn.disabled = false;
+            }
+        }
+
         async function scanPendingRequests() {
             const btn = event.target;
             const origText = btn.textContent;
             btn.textContent = '⏳ Varrendo...';
             btn.disabled = true;
-            const detail = document.getElementById('duplicates-detail');
+            const detail = document.getElementById('exclusivity-results');
 
             try {
                 const res = await fetch('/api/admin/scan-pending-requests', { method: 'POST' });
+                if (!res.ok) {
+                    detail.innerHTML = `<p style="color:#e94560;">Erro: ${res.status} ${res.statusText}</p>`;
+                    detail.style.display = 'block';
+                    return;
+                }
                 const data = await res.json();
                 if (data.error) {
                     detail.innerHTML = `<p style="color:#e94560;">${data.error}</p>`;
@@ -1514,13 +1544,10 @@
 
         async function saveExclusivitySettings() {
             try {
-                // Load current settings first so we don't overwrite other fields
                 const curRes = await fetch('/api/settings');
                 const current = await curRes.json();
 
                 current.exclusive_groups_enabled = document.getElementById('redir-exclusive-enabled').checked;
-                current.exclusive_reject_message = document.getElementById('redir-reject-msg').value;
-                current.exclusive_remove_message = document.getElementById('redir-remove-msg').value;
 
                 const res = await fetch('/api/settings', {
                     method: 'POST',
@@ -1532,7 +1559,7 @@
                     const fb = document.getElementById('excl-save-feedback');
                     fb.classList.add('show');
                     setTimeout(() => fb.classList.remove('show'), 3000);
-                    log('✅ Configurações de exclusividade salvas!');
+                    log('✅ Exclusividade salva!');
                 } else {
                     alert('Erro ao salvar: ' + (data.message || 'erro desconhecido'));
                 }

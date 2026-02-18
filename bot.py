@@ -1557,6 +1557,83 @@ async def api_group_duplicates(username: str = Depends(get_current_username)):
     finally:
         db.close()
 
+@app.post("/api/admin/clean-duplicates")
+async def api_clean_duplicates(username: str = Depends(get_current_username)):
+    """Remove duplicate members from groups — keeps them in the first group (by order), removes from extras."""
+    await ensure_token()
+    db = SessionLocal()
+    try:
+        managed = db.query(WhatsAppGroup).all()
+        if len(managed) < 2:
+            return {"error": "Menos de 2 grupos gerenciados"}
+
+        def extract_phone(member):
+            if isinstance(member, str):
+                return member.split('@')[0]
+            if isinstance(member, dict):
+                for field in ['id', '_serialized', 'user']:
+                    val = member.get(field, '')
+                    if val:
+                        if isinstance(val, dict):
+                            inner = val.get('_serialized', val.get('user', ''))
+                            if inner:
+                                return str(inner).split('@')[0]
+                        else:
+                            return str(val).split('@')[0]
+            return None
+
+        # Build phone -> groups mapping
+        phone_groups = {}  # phone -> [(group_jid, group_name, member_raw_id)]
+        for g in managed:
+            try:
+                members_raw = await wpp.get_group_participants(g.group_jid)
+                if isinstance(members_raw, list):
+                    for m in members_raw:
+                        phone = extract_phone(m)
+                        if phone and len(phone) >= 8:
+                            # Get the raw ID for removal
+                            if isinstance(m, dict):
+                                mid_raw = m.get('id', '')
+                                if isinstance(mid_raw, dict):
+                                    raw_id = mid_raw.get('_serialized', '')
+                                else:
+                                    raw_id = str(mid_raw)
+                            else:
+                                raw_id = str(m)
+                            if phone not in phone_groups:
+                                phone_groups[phone] = []
+                            phone_groups[phone].append((g.group_jid, g.group_name or g.group_jid[:20], raw_id))
+            except Exception as e:
+                logger.error(f"Clean duplicates: error fetching {g.group_jid}: {e}")
+
+        # Find duplicates (in 2+ groups)
+        duplicates = {phone: groups for phone, groups in phone_groups.items() if len(groups) >= 2}
+
+        removed = []
+        failed = []
+
+        for phone, groups in duplicates.items():
+            # Keep in the FIRST group, remove from all others
+            keep_group = groups[0]
+            for group_jid, group_name, raw_id in groups[1:]:
+                try:
+                    await asyncio.sleep(random.uniform(1.5, 3.0))  # Anti-ban delay
+                    success = await wpp.remove_participant(group_jid, raw_id)
+                    if success:
+                        removed.append({"phone": phone, "removed_from": group_name, "kept_in": keep_group[1]})
+                        logger.info(f"CLEAN_DUP: removed {phone} from {group_name}, kept in {keep_group[1]}")
+                    else:
+                        failed.append({"phone": phone, "group": group_name, "error": "API returned false"})
+                except Exception as e:
+                    failed.append({"phone": phone, "group": group_name, "error": str(e)})
+
+        return {"removed": removed, "failed": failed, "total_duplicates": len(duplicates)}
+    except Exception as e:
+        logger.error(f"Error cleaning duplicates: {e}")
+        return {"error": str(e)}
+    finally:
+        db.close()
+
 @app.get("/api/admin/debug-participants/{group_jid:path}")
 async def api_debug_participants(group_jid: str, username: str = Depends(get_current_username)):
     """Debug: show raw participant data for a group."""
