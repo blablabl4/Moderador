@@ -1002,6 +1002,40 @@
                 </div>
             </div>
 
+            <!-- Exclusivity Control -->
+            <div class="card">
+                <div class="card-title">🚫 Controle de Exclusividade</div>
+                <div class="card-body">
+                    <p style="color:#888;font-size:12px;margin-bottom:16px;">Impede que um membro esteja em mais de um
+                        grupo ao mesmo tempo. O bot verifica duplicatas na solicitação de entrada e também após a
+                        entrada como segurança.</p>
+
+                    <div class="setting-row">
+                        <div class="setting-label">Exclusividade ativa<small>Liga/desliga a verificação de membros
+                                duplicados</small></div>
+                        <label class="setting-toggle"><input type="checkbox" id="redir-exclusive-enabled" checked><span
+                                class="toggle-slider"></span></label>
+                    </div>
+                    <div class="setting-row">
+                        <div class="setting-label">Mensagem de rejeição<small>Enviada no privado quando a solicitação é
+                                recusada (pré-entrada)</small></div>
+                        <input type="text" class="setting-input setting-input-wide" id="redir-reject-msg"
+                            value="❌ Sua solicitação foi recusada pois você já faz parte de um dos nossos grupos. Não é permitido estar em mais de um grupo ao mesmo tempo.">
+                    </div>
+                    <div class="setting-row">
+                        <div class="setting-label">Mensagem de remoção<small>Enviada no privado quando removido depois
+                                de entrar (pós-entrada)</small></div>
+                        <input type="text" class="setting-input setting-input-wide" id="redir-remove-msg"
+                            value="⚠️ Você já faz parte de um dos nossos grupos! Não é permitido estar em mais de um grupo ao mesmo tempo. Você foi removido do grupo que acabou de entrar.">
+                    </div>
+                    <div style="margin-top:16px;text-align:center;">
+                        <button class="btn-save" onclick="saveExclusivitySettings()">💾 Salvar Exclusividade</button>
+                        <div class="save-feedback" id="excl-save-feedback">✅ Configurações de exclusividade salvas!
+                        </div>
+                    </div>
+                </div>
+            </div>
+
         </div>
     </div>
 
@@ -1342,6 +1376,48 @@
                 document.getElementById('aff-clicks').textContent = data.total_clicks;
                 document.getElementById('aff-confirmed').textContent = data.total_confirmed;
             } catch (e) { console.error('Redirector stats error:', e); }
+
+            // Load exclusivity settings
+            try {
+                const sRes = await fetch('/api/settings');
+                const settings = await sRes.json();
+                document.getElementById('redir-exclusive-enabled').checked = settings.exclusive_groups_enabled !== false;
+                if (settings.exclusive_reject_message) {
+                    document.getElementById('redir-reject-msg').value = settings.exclusive_reject_message;
+                }
+                if (settings.exclusive_remove_message) {
+                    document.getElementById('redir-remove-msg').value = settings.exclusive_remove_message;
+                }
+            } catch (e) { console.error('Exclusivity settings load error:', e); }
+        }
+
+        async function saveExclusivitySettings() {
+            try {
+                // Load current settings first so we don't overwrite other fields
+                const curRes = await fetch('/api/settings');
+                const current = await curRes.json();
+
+                current.exclusive_groups_enabled = document.getElementById('redir-exclusive-enabled').checked;
+                current.exclusive_reject_message = document.getElementById('redir-reject-msg').value;
+                current.exclusive_remove_message = document.getElementById('redir-remove-msg').value;
+
+                const res = await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(current)
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    const fb = document.getElementById('excl-save-feedback');
+                    fb.classList.add('show');
+                    setTimeout(() => fb.classList.remove('show'), 3000);
+                    log('✅ Configurações de exclusividade salvas!');
+                } else {
+                    alert('Erro ao salvar: ' + (data.message || 'erro desconhecido'));
+                }
+            } catch (e) {
+                alert('Erro: ' + e);
+            }
         }
 
         let _managedJids = new Set();

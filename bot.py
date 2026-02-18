@@ -1895,6 +1895,16 @@ async def api_debug_group_admins(group_id: str, username: str = Depends(get_curr
 
 async def handle_membership_request(group_id: str, participant_ids: list, managed_jids: list):
     """Handle membership approval requests: approve if not duplicate, reject if already in another group."""
+    cfg = load_settings()
+    if not cfg.get("exclusive_groups_enabled", True):
+        # Exclusivity disabled — auto-approve everyone
+        for pid in participant_ids:
+            await asyncio.sleep(random.uniform(0.5, 2.0))
+            await wpp.approve_participant(group_id, pid)
+            logger.info(f"MEMBERSHIP_AUTO_APPROVED (exclusivity off): {pid[:20]} for {group_id[:20]}")
+        return
+    
+    reject_msg = cfg.get("exclusive_reject_message", "❌ Sua solicitação foi recusada pois você já faz parte de um dos nossos grupos. Não é permitido estar em mais de um grupo ao mesmo tempo.")
     other_groups = [g for g in managed_jids if g != group_id]
     
     for participant_id in participant_ids:
@@ -1924,11 +1934,7 @@ async def handle_membership_request(group_id: str, participant_ids: list, manage
             # REJECT — already in another managed group
             logger.info(f"MEMBERSHIP_REJECT: {participant_id[:20]} already in {found_in[:20]}, rejecting from {group_id[:20]}")
             try:
-                await wpp.send_message(
-                    participant_id,
-                    "❌ Sua solicitação foi recusada pois você já faz parte de um dos nossos grupos. Não é permitido estar em mais de um grupo ao mesmo tempo.",
-                    skip_typing=True
-                )
+                await wpp.send_message(participant_id, reject_msg, skip_typing=True)
             except Exception as e:
                 logger.error(f"Error sending reject msg: {e}")
             await asyncio.sleep(random.uniform(1.0, 3.0))
@@ -1950,6 +1956,11 @@ async def handle_membership_request(group_id: str, participant_ids: list, manage
 async def check_exclusive_membership(joined_group: str, participant_ids: list, group_jids: list):
     """Background task: check if new participants are in other groups. Remove from newly joined if duplicate.
     Keeps the member in the group they were in longest (the older one)."""
+    cfg = load_settings()
+    if not cfg.get("exclusive_groups_enabled", True):
+        return
+    
+    remove_msg = cfg.get("exclusive_remove_message", "⚠️ Você já faz parte de um dos nossos grupos! Não é permitido estar em mais de um grupo ao mesmo tempo. Você foi removido do grupo que acabou de entrar.")
     other_groups = [g for g in group_jids if g != joined_group]
     if not other_groups:
         return
@@ -1981,11 +1992,7 @@ async def check_exclusive_membership(joined_group: str, participant_ids: list, g
             logger.info(f"EXCLUSIVE: {participant_id[:20]} already in {found_in[:20]}, removing from {joined_group[:20]}")
             # Send message before removing
             try:
-                await wpp.send_message(
-                    participant_id,
-                    "⚠️ Você já faz parte de um dos nossos grupos! Não é permitido estar em mais de um grupo ao mesmo tempo. Você foi removido do grupo que acabou de entrar.",
-                    skip_typing=True
-                )
+                await wpp.send_message(participant_id, remove_msg, skip_typing=True)
             except Exception as e:
                 logger.error(f"Error sending exclusive msg: {e}")
             await asyncio.sleep(random.uniform(2.0, 5.0))  # Anti-ban delay
