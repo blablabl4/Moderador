@@ -670,10 +670,7 @@ async def job_exclusive_cleanup(force=False):
         if _exclusivity_report["date"] != today:
             _exclusivity_report = {"date": today, "removed_members": [], "rejected_requests": [], "last_run": None}
 
-        cfg = load_settings()
-        if not cfg.get("exclusive_groups_enabled", True):
-            logger.info("EXCLUSIVE_JOB: exclusivity disabled, skipping.")
-            return
+
 
         if not force:
             status = await wpp.check_session_status()
