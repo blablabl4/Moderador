@@ -1479,25 +1479,22 @@
                 }
 
                 let html = `<p style="color:#00b4d8;font-size:13px;margin-bottom:8px;">📋 Resultado da varredura:</p>`;
-                html += `<p style="font-size:12px;color:#888;margin-bottom:8px;">${data.approved.length} aprovado(s) | ${data.rejected.length} rejeitado(s)</p>`;
+                const skipped = data.skipped || 0;
+                html += `<p style="font-size:12px;color:#888;margin-bottom:8px;">${data.rejected.length} rejeitado(s) | ${skipped} pendente(s) mantido(s)</p>`;
 
                 if (data.rejected.length > 0) {
-                    html += '<p style="color:#e94560;font-size:12px;margin-bottom:4px;">❌ Rejeitados:</p>';
+                    html += '<p style="color:#e94560;font-size:12px;margin-bottom:4px;">❌ Rejeitados (duplicados):</p>';
                     for (const r of data.rejected) {
                         html += `<div style="padding:4px 8px;margin-bottom:3px;background:rgba(233,69,96,0.1);border-radius:4px;font-size:11px;">`;
                         html += `📱 ${r.phone} — ${r.group} (já em: ${r.already_in}) ${r.success ? '✅' : '❌'}`;
                         html += `</div>`;
                     }
+                } else if (skipped > 0) {
+                    html += '<p style="color:#25D366;font-size:13px;">✅ Nenhum duplicado nas solicitações pendentes.</p>';
+                } else {
+                    html += '<p style="color:#888;font-size:13px;">Nenhuma solicitação pendente encontrada.</p>';
                 }
-                if (data.approved.length > 0) {
-                    html += '<p style="color:#25D366;font-size:12px;margin-bottom:4px;margin-top:8px;">✅ Aprovados:</p>';
-                    for (const a of data.approved) {
-                        html += `<div style="padding:4px 8px;margin-bottom:3px;background:rgba(37,211,102,0.1);border-radius:4px;font-size:11px;">`;
-                        html += `📱 ${a.phone} — ${a.group} ${a.success ? '✅' : '❌'}`;
-                        html += `</div>`;
-                    }
-                }
-                if (data.errors.length > 0) {
+                if (data.errors && data.errors.length > 0) {
                     html += '<p style="color:#f5a623;font-size:12px;margin-top:8px;">⚠️ Erros:</p>';
                     for (const e of data.errors) {
                         html += `<div style="font-size:11px;color:#888;">${e.group}: ${e.error}</div>`;

@@ -1473,38 +1473,59 @@ async def api_group_duplicates(username: str = Depends(get_current_username)):
         if not managed:
             return {"error": "Nenhum grupo gerenciado encontrado"}
         
-        # Fetch members for each managed group
-        group_members = {}  # {group_jid: {"name": str, "ids": set()}}
+        def extract_phone(member):
+            """Extract phone number from any WPPConnect participant format."""
+            if isinstance(member, str):
+                return member.split('@')[0]
+            if isinstance(member, dict):
+                # Try multiple fields
+                for field in ['id', '_serialized', 'user']:
+                    val = member.get(field, '')
+                    if val:
+                        if isinstance(val, dict):
+                            # Nested id object: {_serialized: "55...@c.us", user: "55..."}
+                            inner = val.get('_serialized', val.get('user', ''))
+                            if inner:
+                                return str(inner).split('@')[0]
+                        else:
+                            return str(val).split('@')[0]
+            return None
         
-        def extract_ids(members):
-            ids = set()
-            for m in members:
-                if isinstance(m, dict):
-                    mid = m.get('id', m.get('_serialized', ''))
-                    if isinstance(mid, dict):
-                        mid = mid.get('_serialized', mid.get('user', ''))
-                    ids.add(str(mid).split('@')[0])
-                elif isinstance(m, str):
-                    ids.add(m.split('@')[0])
-            return ids
+        # Fetch members for each managed group
+        group_members = {}
+        debug_info = []
         
         for g in managed:
             try:
                 members_raw = await wpp.get_group_participants(g.group_jid)
-                if isinstance(members_raw, list):
+                sample = None
+                if isinstance(members_raw, list) and len(members_raw) > 0:
+                    sample = str(members_raw[0])[:200]
+                    ids = set()
+                    for m in members_raw:
+                        phone = extract_phone(m)
+                        if phone and len(phone) > 3:  # Skip empty/invalid
+                            ids.add(phone)
                     group_members[g.group_jid] = {
                         "name": g.name,
-                        "ids": extract_ids(members_raw),
-                        "total": len(extract_ids(members_raw))
+                        "ids": ids,
+                        "total": len(ids),
+                        "raw_count": len(members_raw)
                     }
+                    debug_info.append({"group": g.name, "raw_count": len(members_raw), "extracted": len(ids), "sample": sample})
+                    logger.info(f"DUPLICATES_CHECK: {g.name} - raw={len(members_raw)}, extracted={len(ids)}, sample={sample}")
+                else:
+                    logger.warning(f"DUPLICATES_CHECK: {g.name} - no members or not a list. type={type(members_raw)}, val={str(members_raw)[:200]}")
+                    debug_info.append({"group": g.name, "raw_count": 0, "extracted": 0, "sample": str(members_raw)[:200]})
             except Exception as e:
                 logger.error(f"Error fetching members for {g.name}: {e}")
+                debug_info.append({"group": g.name, "error": str(e)})
         
         if len(group_members) < 2:
-            return {"error": "Menos de 2 grupos com dados de membros", "groups_found": len(group_members)}
+            return {"error": "Menos de 2 grupos com dados de membros", "groups_found": len(group_members), "debug": debug_info}
         
-        # Find duplicates: members present in more than one group
-        member_groups = {}  # {member_id: [group_names]}
+        # Find duplicates
+        member_groups = {}
         for jid, info in group_members.items():
             for mid in info["ids"]:
                 if mid not in member_groups:
@@ -1514,13 +1535,7 @@ async def api_group_duplicates(username: str = Depends(get_current_username)):
         duplicates = {mid: groups for mid, groups in member_groups.items() if len(groups) > 1}
         all_unique = set(member_groups.keys())
         
-        # Per-group stats
-        groups_summary = []
-        for jid, info in group_members.items():
-            groups_summary.append({
-                "name": info["name"],
-                "members": info["total"]
-            })
+        groups_summary = [{"name": info["name"], "members": info["total"], "raw_count": info.get("raw_count", 0)} for jid, info in group_members.items()]
         
         return {
             "groups": groups_summary,
@@ -1531,13 +1546,29 @@ async def api_group_duplicates(username: str = Depends(get_current_username)):
             "duplicate_members": [
                 {"phone": mid, "in_groups": groups}
                 for mid, groups in sorted(duplicates.items())
-            ]
+            ],
+            "debug": debug_info
         }
     except Exception as e:
         logger.error(f"Error checking duplicates: {e}")
         return {"error": str(e)}
     finally:
         db.close()
+
+@app.get("/api/admin/debug-participants/{group_jid:path}")
+async def api_debug_participants(group_jid: str, username: str = Depends(get_current_username)):
+    """Debug: show raw participant data for a group."""
+    try:
+        members = await wpp.get_group_participants(group_jid)
+        sample = members[:3] if isinstance(members, list) else members
+        return {
+            "group_jid": group_jid,
+            "type": str(type(members)),
+            "count": len(members) if isinstance(members, list) else 0,
+            "sample_3": sample
+        }
+    except Exception as e:
+        return {"error": str(e)}
 
 @app.get("/api/groups/managed")
 async def api_managed_groups_list(username: str = Depends(get_current_username)):
@@ -1790,15 +1821,9 @@ async def api_scan_pending_requests(username: str = Depends(get_current_username
                             "success": ok
                         })
                     else:
-                        # Approve — not duplicate
-                        logger.info(f"SCAN_PENDING_APPROVE: {req_phone} for {g.name}")
-                        await asyncio.sleep(random.uniform(0.5, 2.0))
-                        ok = await wpp.approve_participant(g.group_jid, req_id)
-                        results["approved"].append({
-                            "phone": req_phone,
-                            "group": g.name,
-                            "success": ok
-                        })
+                        # Not duplicate — leave pending for manual approval
+                        logger.info(f"SCAN_PENDING_SKIP: {req_phone} not duplicate, leaving pending for {g.name}")
+                        results["skipped"] = results.get("skipped", 0) + 1
             except Exception as e:
                 logger.error(f"SCAN_PENDING: Error scanning {g.name}: {e}")
                 results["errors"].append({"group": g.name, "error": str(e)})
@@ -2036,11 +2061,8 @@ async def handle_membership_request(group_id: str, participant_ids: list, manage
     """Handle membership approval requests: approve if not duplicate, reject if already in another group."""
     cfg = load_settings()
     if not cfg.get("exclusive_groups_enabled", True):
-        # Exclusivity disabled — auto-approve everyone
-        for pid in participant_ids:
-            await asyncio.sleep(random.uniform(0.5, 2.0))
-            await wpp.approve_participant(group_id, pid)
-            logger.info(f"MEMBERSHIP_AUTO_APPROVED (exclusivity off): {pid[:20]} for {group_id[:20]}")
+        # Exclusivity disabled — leave requests pending for manual approval
+        logger.info(f"MEMBERSHIP_REQUEST: exclusivity off, leaving pending for {group_id[:20]}")
         return
     
     reject_msg = cfg.get("exclusive_reject_message", "")
@@ -2079,14 +2101,8 @@ async def handle_membership_request(group_id: str, participant_ids: list, manage
             else:
                 logger.error(f"MEMBERSHIP_REJECT_FAILED: {participant_id[:20]} from {group_id[:20]}")
         else:
-            # APPROVE — not a duplicate
-            logger.info(f"MEMBERSHIP_APPROVE: {participant_id[:20]} not in any other group, approving for {group_id[:20]}")
-            await asyncio.sleep(random.uniform(0.5, 2.0))
-            approved = await wpp.approve_participant(group_id, participant_id)
-            if approved:
-                logger.info(f"MEMBERSHIP_APPROVED: {participant_id[:20]} for {group_id[:20]}")
-            else:
-                logger.error(f"MEMBERSHIP_APPROVE_FAILED: {participant_id[:20]} for {group_id[:20]}")
+            # Not a duplicate — leave pending for manual approval
+            logger.info(f"MEMBERSHIP_SKIP: {participant_id[:20]} not duplicate, leaving pending for {group_id[:20]}")
 
 async def check_exclusive_membership(joined_group: str, participant_ids: list, group_jids: list):
     """Background task: check if new participants are in other groups. Remove from newly joined if duplicate.
