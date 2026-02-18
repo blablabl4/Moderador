@@ -1778,6 +1778,16 @@ async def api_exclusivity_report(username: str = Depends(get_current_username)):
         return {"date": today, "removed_members": [], "rejected_requests": [], "last_run": None}
     return _exclusivity_report
 
+@app.post("/api/admin/trigger-exclusive-cleanup")
+async def api_trigger_exclusive_cleanup(username: str = Depends(get_current_username)):
+    """Manually trigger the exclusive cleanup job."""
+    try:
+        await job_exclusive_cleanup()
+        return _exclusivity_report
+    except Exception as e:
+        logger.error(f"Manual trigger error: {e}")
+        return {"error": str(e)}
+
 @app.get("/api/admin/group-members-list")
 async def api_group_members_list(username: str = Depends(get_current_username)):
     """List all members of all managed groups."""
