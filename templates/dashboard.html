@@ -950,6 +950,21 @@
                             <span class="status-label">Entradas Confirmadas</span>
                             <span class="status-value" id="aff-confirmed" style="color:#25D366;">...</span>
                         </div>
+                        <div style="border-top:1px solid rgba(255,255,255,0.06);margin-top:12px;padding-top:12px;">
+                            <div class="status-row">
+                                <span class="status-label">Membros Únicos</span>
+                                <span class="status-value" id="redir-unique" style="color:#00b4d8;">...</span>
+                            </div>
+                            <div class="status-row">
+                                <span class="status-label">Membros Duplicados</span>
+                                <span class="status-value" id="redir-duplicates" style="color:#e94560;">...</span>
+                            </div>
+                        </div>
+                        <button onclick="checkDuplicates()" class="btn btn-green"
+                            style="width:100%;margin-top:12px;font-size:12px;">🔍 Verificar Duplicatas</button>
+                        <div id="duplicates-detail"
+                            style="display:none;margin-top:12px;max-height:300px;overflow-y:auto;background:rgba(0,0,0,0.2);border-radius:8px;padding:10px;">
+                        </div>
                     </div>
                 </div>
                 <div class="card">
@@ -1377,6 +1392,16 @@
                 document.getElementById('aff-confirmed').textContent = data.total_confirmed;
             } catch (e) { console.error('Redirector stats error:', e); }
 
+            // Load unique/duplicate member counts
+            try {
+                const dRes = await fetch('/api/admin/group-duplicates');
+                const dData = await dRes.json();
+                if (!dData.error) {
+                    document.getElementById('redir-unique').textContent = dData.unique_members || 0;
+                    document.getElementById('redir-duplicates').textContent = dData.duplicates_count || 0;
+                }
+            } catch (e) { console.error('Duplicates stats error:', e); }
+
             // Load exclusivity settings
             try {
                 const sRes = await fetch('/api/settings');
@@ -1389,6 +1414,49 @@
                     document.getElementById('redir-remove-msg').value = settings.exclusive_remove_message;
                 }
             } catch (e) { console.error('Exclusivity settings load error:', e); }
+        }
+
+        async function checkDuplicates() {
+            const btn = event.target;
+            const origText = btn.textContent;
+            btn.textContent = '⏳ Verificando...';
+            btn.disabled = true;
+            const detail = document.getElementById('duplicates-detail');
+
+            try {
+                const res = await fetch('/api/admin/group-duplicates');
+                const data = await res.json();
+                if (data.error) {
+                    detail.innerHTML = `<p style="color:#e94560;">${data.error}</p>`;
+                    detail.style.display = 'block';
+                    return;
+                }
+
+                document.getElementById('redir-unique').textContent = data.unique_members || 0;
+                document.getElementById('redir-duplicates').textContent = data.duplicates_count || 0;
+
+                if (data.duplicates_count === 0) {
+                    detail.innerHTML = '<p style="color:#25D366;font-size:13px;">✅ Nenhum membro duplicado encontrado!</p>';
+                } else {
+                    let html = `<p style="color:#e94560;font-size:13px;margin-bottom:10px;">⚠️ ${data.duplicates_count} membro(s) duplicado(s):</p>`;
+                    html += '<div style="font-size:12px;">';
+                    for (const dup of data.duplicate_members) {
+                        html += `<div style="padding:6px 8px;margin-bottom:4px;background:rgba(233,69,96,0.1);border-radius:6px;border-left:3px solid #e94560;">`;
+                        html += `<strong style="color:#fff;">📱 ${dup.phone}</strong>`;
+                        html += `<br><span style="color:#888;">Em: ${dup.in_groups.join(' • ')}</span>`;
+                        html += `</div>`;
+                    }
+                    html += '</div>';
+                    detail.innerHTML = html;
+                }
+                detail.style.display = 'block';
+            } catch (e) {
+                detail.innerHTML = `<p style="color:#e94560;">Erro: ${e}</p>`;
+                detail.style.display = 'block';
+            } finally {
+                btn.textContent = origText;
+                btn.disabled = false;
+            }
         }
 
         async function saveExclusivitySettings() {
