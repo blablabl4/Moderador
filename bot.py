@@ -1448,55 +1448,78 @@ async def page_ranking(request: Request):
 # Temporary endpoint to check duplicates between groups
 @app.get("/api/admin/group-duplicates")
 async def api_group_duplicates(username: str = Depends(get_current_username)):
-    """Check duplicate members between the two managed groups."""
-    group1_jid = "120363404846725137@g.us"  # DEZAPEGÃO #01
-    group2_jid = "120363408119561849@g.us"  # DEZAPEGÃO #02
-    
-    async with httpx.AsyncClient(timeout=30) as client:
-        try:
-            # Get members of group 1
-            url1 = f"{wpp.base_url}/api/{wpp.session}/group-members/{group1_jid}"
-            resp1 = await client.get(url1, headers=wpp.headers)
-            members1_raw = resp1.json() if resp1.status_code == 200 else []
-            if isinstance(members1_raw, dict):
-                members1_raw = members1_raw.get('response', members1_raw.get('data', []))
-            
-            # Get members of group 2
-            url2 = f"{wpp.base_url}/api/{wpp.session}/group-members/{group2_jid}"
-            resp2 = await client.get(url2, headers=wpp.headers)
-            members2_raw = resp2.json() if resp2.status_code == 200 else []
-            if isinstance(members2_raw, dict):
-                members2_raw = members2_raw.get('response', members2_raw.get('data', []))
-            
-            # Extract phone IDs
-            def extract_ids(members):
-                ids = set()
-                for m in members:
-                    if isinstance(m, dict):
-                        mid = m.get('id', m.get('_serialized', ''))
-                        if isinstance(mid, dict):
-                            mid = mid.get('_serialized', mid.get('user', ''))
-                        ids.add(str(mid).split('@')[0])
-                    elif isinstance(m, str):
-                        ids.add(m.split('@')[0])
-                return ids
-            
-            ids1 = extract_ids(members1_raw)
-            ids2 = extract_ids(members2_raw)
-            duplicates = ids1 & ids2
-            
-            return {
-                "group1_name": "DEZAPEGÃO #01",
-                "group1_members": len(ids1),
-                "group2_name": "DEZAPEGÃO #02", 
-                "group2_members": len(ids2),
-                "duplicates_count": len(duplicates),
-                "unique_total": len(ids1 | ids2),
-                "duplicate_percentage": f"{len(duplicates) / max(len(ids1 | ids2), 1) * 100:.1f}%"
-            }
-        except Exception as e:
-            logger.error(f"Error checking duplicates: {e}")
-            return {"error": str(e)}
+    """Check duplicate members across ALL managed groups dynamically."""
+    db = SessionLocal()
+    try:
+        managed = db.query(WhatsAppGroup).all()
+        if not managed:
+            return {"error": "Nenhum grupo gerenciado encontrado"}
+        
+        # Fetch members for each managed group
+        group_members = {}  # {group_jid: {"name": str, "ids": set()}}
+        
+        def extract_ids(members):
+            ids = set()
+            for m in members:
+                if isinstance(m, dict):
+                    mid = m.get('id', m.get('_serialized', ''))
+                    if isinstance(mid, dict):
+                        mid = mid.get('_serialized', mid.get('user', ''))
+                    ids.add(str(mid).split('@')[0])
+                elif isinstance(m, str):
+                    ids.add(m.split('@')[0])
+            return ids
+        
+        for g in managed:
+            try:
+                members_raw = await wpp.get_group_participants(g.group_jid)
+                if isinstance(members_raw, list):
+                    group_members[g.group_jid] = {
+                        "name": g.name,
+                        "ids": extract_ids(members_raw),
+                        "total": len(extract_ids(members_raw))
+                    }
+            except Exception as e:
+                logger.error(f"Error fetching members for {g.name}: {e}")
+        
+        if len(group_members) < 2:
+            return {"error": "Menos de 2 grupos com dados de membros", "groups_found": len(group_members)}
+        
+        # Find duplicates: members present in more than one group
+        member_groups = {}  # {member_id: [group_names]}
+        for jid, info in group_members.items():
+            for mid in info["ids"]:
+                if mid not in member_groups:
+                    member_groups[mid] = []
+                member_groups[mid].append(info["name"])
+        
+        duplicates = {mid: groups for mid, groups in member_groups.items() if len(groups) > 1}
+        all_unique = set(member_groups.keys())
+        
+        # Per-group stats
+        groups_summary = []
+        for jid, info in group_members.items():
+            groups_summary.append({
+                "name": info["name"],
+                "members": info["total"]
+            })
+        
+        return {
+            "groups": groups_summary,
+            "total_groups": len(group_members),
+            "unique_members": len(all_unique),
+            "duplicates_count": len(duplicates),
+            "duplicate_percentage": f"{len(duplicates) / max(len(all_unique), 1) * 100:.1f}%",
+            "duplicate_members": [
+                {"phone": mid, "in_groups": groups}
+                for mid, groups in sorted(duplicates.items())
+            ]
+        }
+    except Exception as e:
+        logger.error(f"Error checking duplicates: {e}")
+        return {"error": str(e)}
+    finally:
+        db.close()
 
 @app.get("/api/groups/managed")
 async def api_managed_groups_list(username: str = Depends(get_current_username)):
