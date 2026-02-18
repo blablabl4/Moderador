@@ -247,18 +247,48 @@ class WPPConnectClient:
                 return ""
 
     async def remove_participant(self, group_id: str, participant_id: str):
-        """Remove a participant from a group."""
+        """Remove a participant from a group. Tries multiple ID formats."""
         url = f"{self.base_url}/api/{self.session}/remove-participant-group"
-        payload = {"groupId": group_id, "participantId": [participant_id]}
-        logger.info(f"REMOVE_PARTICIPANT: group={group_id}, participant={participant_id}")
+
+        # Build list of ID formats to try
+        base = participant_id.split('@')[0]
+        formats_to_try = []
+        # Add the original ID as-is first
+        formats_to_try.append(participant_id)
+        # Then try other formats
+        if not participant_id.endswith('@c.us'):
+            formats_to_try.append(f"{base}@c.us")
+        if not participant_id.endswith('@lid'):
+            formats_to_try.append(f"{base}@lid")
+
         async with httpx.AsyncClient(timeout=30) as client:
-            try:
-                resp = await client.post(url, json=payload, headers=self.headers)
-                logger.info(f"REMOVE_PARTICIPANT response: {resp.status_code} - {resp.text[:200]}")
-                return resp.status_code == 200
-            except Exception as e:
-                logger.error(f"Error removing participant: {e}")
-                return False
+            for fmt in formats_to_try:
+                try:
+                    payload = {"groupId": group_id, "participantId": [fmt]}
+                    logger.info(f"REMOVE_PARTICIPANT: group={group_id[:30]}, participant={fmt}")
+                    resp = await client.post(url, json=payload, headers=self.headers)
+                    body = resp.text[:300]
+                    logger.info(f"REMOVE_PARTICIPANT response: status={resp.status_code}, body={body}")
+
+                    # Accept any 2xx as success
+                    if 200 <= resp.status_code < 300:
+                        # Also check body for error indicators
+                        body_lower = body.lower()
+                        if 'error' not in body_lower or 'not' not in body_lower:
+                            logger.info(f"REMOVE_PARTICIPANT: ✅ SUCCESS with format {fmt}")
+                            return True
+                        else:
+                            logger.warning(f"REMOVE_PARTICIPANT: 2xx but body has error: {body}")
+                            continue
+                    else:
+                        logger.warning(f"REMOVE_PARTICIPANT: status {resp.status_code} with format {fmt}")
+                        continue
+                except Exception as e:
+                    logger.error(f"REMOVE_PARTICIPANT error with format {fmt}: {e}")
+                    continue
+
+        logger.error(f"REMOVE_PARTICIPANT: ALL formats failed for {participant_id} in {group_id[:30]}")
+        return False
 
     async def approve_participant(self, group_id: str, participant_id: str):
         """Approve a pending membership request for a group."""
@@ -688,6 +718,7 @@ async def job_exclusive_cleanup(force=False):
                 return
 
             def extract_phone(member):
+                """Extract identifier from any WPPConnect participant format."""
                 if isinstance(member, str):
                     return member.split('@')[0]
                 if isinstance(member, dict):
@@ -702,21 +733,36 @@ async def job_exclusive_cleanup(force=False):
                                 return str(val).split('@')[0]
                 return None
 
+            def extract_raw_id(member):
+                """Extract the full raw serialized ID for API calls."""
+                if isinstance(member, str):
+                    return member
+                if isinstance(member, dict):
+                    mid = member.get('id', '')
+                    if isinstance(mid, dict):
+                        return mid.get('_serialized', '')
+                    elif mid:
+                        return str(mid)
+                return ''
+
             # --- Part 1: Remove duplicate members ---
-            # Build phone -> list of (group_jid, group_name)
+            # Build phone -> list of (group_jid, group_name, raw_id)
             phone_groups = {}
             for g in managed:
                 try:
                     members_raw = await wpp.get_group_participants(g.group_jid)
                     count = len(members_raw) if isinstance(members_raw, list) else 0
                     logger.info(f"EXCLUSIVE_JOB: group={g.name}, members={count}")
-                    if isinstance(members_raw, list):
+                    if isinstance(members_raw, list) and count > 0:
+                        sample = str(members_raw[0])[:300]
+                        logger.info(f"EXCLUSIVE_JOB: sample member of {g.name}: {sample}")
                         for m in members_raw:
                             phone = extract_phone(m)
+                            raw_id = extract_raw_id(m)
                             if phone and len(phone) >= 8:
                                 if phone not in phone_groups:
                                     phone_groups[phone] = []
-                                phone_groups[phone].append((g.group_jid, g.name or g.group_jid[:20]))
+                                phone_groups[phone].append((g.group_jid, g.name or g.group_jid[:20], raw_id))
                 except Exception as e:
                     logger.error(f"EXCLUSIVE_JOB: error fetching {g.name}: {e}")
 
@@ -727,13 +773,13 @@ async def job_exclusive_cleanup(force=False):
             failed_count = 0
             for phone, groups in duplicates.items():
                 keep = groups[0]
-                for group_jid, group_name in groups[1:]:
+                for group_jid, group_name, raw_id in groups[1:]:
                     try:
                         await asyncio.sleep(random.uniform(1.5, 3.0))
-                        # USE phone@c.us format — raw @lid IDs don't work for removal
-                        participant_cus = f"{phone}@c.us"
-                        logger.info(f"EXCLUSIVE_JOB: removing {participant_cus} from {group_name}")
-                        success = await wpp.remove_participant(group_jid, participant_cus)
+                        # Pass raw_id — remove_participant will try multiple formats
+                        id_to_use = raw_id if raw_id else f"{phone}@c.us"
+                        logger.info(f"EXCLUSIVE_JOB: removing {id_to_use} from {group_name}")
+                        success = await wpp.remove_participant(group_jid, id_to_use)
                         if success:
                             removed_count += 1
                             _exclusivity_report["removed_members"].append({
@@ -766,7 +812,7 @@ async def job_exclusive_cleanup(force=False):
                             continue
                         # Check if already in another group
                         if req_phone in phone_groups:
-                            req_in_groups = [gj for gj, _ in phone_groups.get(req_phone, [])]
+                            req_in_groups = [gj for gj, _, _ in phone_groups.get(req_phone, [])]
                             if any(gj != g.group_jid for gj in req_in_groups):
                                 await asyncio.sleep(random.uniform(1.0, 3.0))
                                 await wpp.reject_participant(g.group_jid, req_id)
@@ -778,6 +824,31 @@ async def job_exclusive_cleanup(force=False):
                                 logger.info(f"EXCLUSIVE_JOB: rejected pending {req_phone} from {g.name}")
                 except Exception as e:
                     logger.error(f"EXCLUSIVE_JOB: pending scan error for {g.name}: {e}")
+
+            # --- Part 3: POST-RUN VALIDATION ---
+            logger.info("EXCLUSIVE_JOB: starting post-run validation...")
+            validation_phone_groups = {}
+            for g in managed:
+                try:
+                    members_raw = await wpp.get_group_participants(g.group_jid)
+                    if isinstance(members_raw, list):
+                        for m in members_raw:
+                            phone = extract_phone(m)
+                            if phone and len(phone) >= 8:
+                                if phone not in validation_phone_groups:
+                                    validation_phone_groups[phone] = []
+                                validation_phone_groups[phone].append(g.name or g.group_jid[:20])
+                except Exception as e:
+                    logger.error(f"EXCLUSIVE_JOB: validation error for {g.name}: {e}")
+
+            remaining_duplicates = {p: gs for p, gs in validation_phone_groups.items() if len(gs) >= 2}
+            _exclusivity_report["validation"] = {
+                "remaining_duplicates": len(remaining_duplicates),
+                "total_unique": len(validation_phone_groups),
+                "effective_removals": len(duplicates) - len(remaining_duplicates),
+                "sample_remaining": [{"phone": p, "groups": gs} for p, gs in list(remaining_duplicates.items())[:10]]
+            }
+            logger.info(f"EXCLUSIVE_JOB: VALIDATION — before={len(duplicates)}, remaining={len(remaining_duplicates)}, effective={len(duplicates) - len(remaining_duplicates)}")
 
             _exclusivity_report["last_run"] = datetime.now().strftime("%H:%M:%S")
             logger.info(f"EXCLUSIVE_JOB: done — {removed_count} removed, {failed_count} failed, {rejected_count} rejected, {len(duplicates)} duplicates found")

@@ -1453,6 +1453,24 @@
                     }
                 }
 
+                // Show validation results if available
+                if (data.validation) {
+                    const v = data.validation;
+                    const color = v.remaining_duplicates === 0 ? '#25D366' : '#e94560';
+                    html += `<div style="margin-top:8px;padding:8px;border-radius:6px;background:rgba(255,255,255,0.05);border:1px solid ${color};">`;
+                    html += `<p style="font-size:12px;color:${color};font-weight:bold;margin-bottom:4px;">📊 Validação Pós-Varredura</p>`;
+                    html += `<p style="font-size:11px;color:#ccc;">Remoções efetivas: <strong style="color:#25D366;">${v.effective_removals}</strong></p>`;
+                    html += `<p style="font-size:11px;color:#ccc;">Duplicatas restantes: <strong style="color:${color};">${v.remaining_duplicates}</strong></p>`;
+                    html += `<p style="font-size:11px;color:#ccc;">Membros únicos totais: <strong>${v.total_unique}</strong></p>`;
+                    if (v.remaining_duplicates > 0 && v.sample_remaining && v.sample_remaining.length > 0) {
+                        html += `<p style="font-size:10px;color:#f5a623;margin-top:4px;">Amostra de duplicatas persistentes:</p>`;
+                        for (const s of v.sample_remaining.slice(0, 5)) {
+                            html += `<div style="font-size:9px;color:#aaa;padding:2px 4px;">${s.phone} → ${s.groups.join(', ')}</div>`;
+                        }
+                    }
+                    html += `</div>`;
+                }
+
                 div.innerHTML = html;
             } catch (e) {
                 div.innerHTML = `<p style="font-size:12px;color:#e94560;">Erro ao carregar relatório: ${e}</p>`;
