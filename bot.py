@@ -1865,9 +1865,10 @@ async def api_debug_group_admins(group_id: str, username: str = Depends(get_curr
     cached_ids = await get_group_admin_ids(group_id)
     return {"group_id": group_id, "raw_admins": raw_admins, "cached_ids": list(cached_ids)}
 
-async def check_exclusive_membership(joined_group: str, participant_ids: list, monitored_groups: list):
-    """Background task: check if new participants are in other monitored groups. Remove if so."""
-    other_groups = [g for g in monitored_groups if g != joined_group]
+async def check_exclusive_membership(joined_group: str, participant_ids: list, group_jids: list):
+    """Background task: check if new participants are in other groups. Remove from newly joined if duplicate.
+    Keeps the member in the group they were in longest (the older one)."""
+    other_groups = [g for g in group_jids if g != joined_group]
     if not other_groups:
         return
     
@@ -1896,9 +1897,21 @@ async def check_exclusive_membership(joined_group: str, participant_ids: list, m
         
         if found_in:
             logger.info(f"EXCLUSIVE: {participant_id[:20]} already in {found_in[:20]}, removing from {joined_group[:20]}")
-            # Remove from the group they just joined (no DM to reduce ban risk)
+            # Send message before removing
+            try:
+                await wpp.send_message(
+                    participant_id,
+                    "⚠️ Você já faz parte de um dos nossos grupos! Não é permitido estar em mais de um grupo ao mesmo tempo. Você foi removido do grupo que acabou de entrar.",
+                    skip_typing=True
+                )
+            except Exception as e:
+                logger.error(f"Error sending exclusive msg: {e}")
             await asyncio.sleep(random.uniform(2.0, 5.0))  # Anti-ban delay
             removed = await wpp.remove_participant(joined_group, participant_id)
+            if removed:
+                logger.info(f"EXCLUSIVE_REMOVED: {participant_id[:20]} removed from {joined_group[:20]}")
+            else:
+                logger.error(f"EXCLUSIVE_REMOVE_FAILED: {participant_id[:20]} from {joined_group[:20]}")
 
 @app.post("/webhook")
 async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
@@ -1937,27 +1950,35 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
         if isinstance(msg, dict):
             background_tasks.add_task(handle_participant_change, msg)
         
-        if cfg.get("exclusive_groups_enabled", False):
-            if action in ('add', 'join'):
-                group_id = msg.get('groupId', '') or msg.get('chatId', '')
-                who = msg.get('who', '') or msg.get('participantId', '')
-                
-                # Normalize: handle list or single string
-                if isinstance(who, list):
-                    participants = who
-                else:
-                    participants = [who] if who else []
-                
-                log_entry["action"] = action
-                log_entry["group"] = group_id
-                log_entry["participants"] = [p[:20] for p in participants]
-                
-                monitored = cfg.get("monitored_groups", [])
-                if monitored and group_id in monitored and participants:
-                    background_tasks.add_task(
-                        check_exclusive_membership, group_id, participants, monitored
-                    )
-                    log_entry["status"] = "exclusive_check_queued"
+        # Always check exclusivity for managed (redirector) groups
+        if action in ('add', 'join'):
+            group_id = msg.get('groupId', '') or msg.get('chatId', '')
+            who = msg.get('who', '') or msg.get('participantId', '')
+            
+            # Normalize: handle list or single string
+            if isinstance(who, list):
+                participants = who
+            else:
+                participants = [who] if who else []
+            
+            log_entry["action"] = action
+            log_entry["group"] = group_id
+            log_entry["participants"] = [p[:20] for p in participants]
+            
+            # Build list of all managed group JIDs from DB
+            managed_jids = []
+            try:
+                db_exc = SessionLocal()
+                managed_jids = [g.group_jid for g in db_exc.query(WhatsAppGroup).filter_by(is_active=True).all()]
+                db_exc.close()
+            except Exception as e:
+                logger.error(f"Error loading managed groups for exclusive check: {e}")
+            
+            if managed_jids and group_id in managed_jids and participants:
+                background_tasks.add_task(
+                    check_exclusive_membership, group_id, participants, managed_jids
+                )
+                log_entry["status"] = "exclusive_check_queued"
         
         _log_webhook(log_entry)
         return {"status": log_entry.get("status", "participant_event")}
