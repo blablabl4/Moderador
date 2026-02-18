@@ -660,7 +660,7 @@ _exclusivity_report = {
     "last_run": None
 }
 
-async def job_exclusive_cleanup():
+async def job_exclusive_cleanup(force=False):
     """Automatic job: remove duplicate members and reject duplicate pending requests."""
     global _exclusivity_report
     try:
@@ -674,15 +674,19 @@ async def job_exclusive_cleanup():
             logger.info("EXCLUSIVE_JOB: exclusivity disabled, skipping.")
             return
 
-        status = await wpp.check_session_status()
-        if not status.get("connected"):
-            logger.info("EXCLUSIVE_JOB: session not connected, skipping.")
-            return
+        if not force:
+            status = await wpp.check_session_status()
+            if not status.get("connected"):
+                logger.info("EXCLUSIVE_JOB: session not connected, skipping.")
+                return
+
+        await ensure_token()
 
         db = SessionLocal()
         try:
             managed = db.query(WhatsAppGroup).all()
             if len(managed) < 2:
+                logger.info(f"EXCLUSIVE_JOB: only {len(managed)} managed group(s), skipping.")
                 return
 
             def extract_phone(member):
@@ -701,80 +705,84 @@ async def job_exclusive_cleanup():
                 return None
 
             # --- Part 1: Remove duplicate members ---
+            # Build phone -> list of (group_jid, group_name)
             phone_groups = {}
             for g in managed:
                 try:
                     members_raw = await wpp.get_group_participants(g.group_jid)
+                    count = len(members_raw) if isinstance(members_raw, list) else 0
+                    logger.info(f"EXCLUSIVE_JOB: group={g.name}, members={count}")
                     if isinstance(members_raw, list):
                         for m in members_raw:
                             phone = extract_phone(m)
                             if phone and len(phone) >= 8:
-                                if isinstance(m, dict):
-                                    mid_raw = m.get('id', '')
-                                    if isinstance(mid_raw, dict):
-                                        raw_id = mid_raw.get('_serialized', '')
-                                    else:
-                                        raw_id = str(mid_raw)
-                                else:
-                                    raw_id = str(m)
                                 if phone not in phone_groups:
                                     phone_groups[phone] = []
-                                phone_groups[phone].append((g.group_jid, g.name or g.group_jid[:20], raw_id))
+                                phone_groups[phone].append((g.group_jid, g.name or g.group_jid[:20]))
                 except Exception as e:
-                    logger.error(f"EXCLUSIVE_JOB: error fetching {g.group_jid[:20]}: {e}")
+                    logger.error(f"EXCLUSIVE_JOB: error fetching {g.name}: {e}")
 
             duplicates = {p: gs for p, gs in phone_groups.items() if len(gs) >= 2}
+            logger.info(f"EXCLUSIVE_JOB: total_phones={len(phone_groups)}, duplicates={len(duplicates)}")
+
             removed_count = 0
+            failed_count = 0
             for phone, groups in duplicates.items():
                 keep = groups[0]
-                for group_jid, group_name, raw_id in groups[1:]:
+                for group_jid, group_name in groups[1:]:
                     try:
-                        await asyncio.sleep(random.uniform(2.0, 4.0))
-                        success = await wpp.remove_participant(group_jid, raw_id)
+                        await asyncio.sleep(random.uniform(1.5, 3.0))
+                        # USE phone@c.us format — raw @lid IDs don't work for removal
+                        participant_cus = f"{phone}@c.us"
+                        logger.info(f"EXCLUSIVE_JOB: removing {participant_cus} from {group_name}")
+                        success = await wpp.remove_participant(group_jid, participant_cus)
                         if success:
                             removed_count += 1
                             _exclusivity_report["removed_members"].append({
                                 "phone": phone, "removed_from": group_name,
                                 "kept_in": keep[1], "time": datetime.now().strftime("%H:%M")
                             })
-                            logger.info(f"EXCLUSIVE_JOB: removed {phone} from {group_name}, kept in {keep[1]}")
+                            logger.info(f"EXCLUSIVE_JOB: ✅ removed {phone} from {group_name}, kept in {keep[1]}")
+                        else:
+                            failed_count += 1
+                            _exclusivity_report["removed_members"].append({
+                                "phone": phone, "removed_from": f"❌ FALHOU: {group_name}",
+                                "kept_in": keep[1], "time": datetime.now().strftime("%H:%M")
+                            })
+                            logger.warning(f"EXCLUSIVE_JOB: ❌ FAILED to remove {phone} from {group_name}")
                     except Exception as e:
+                        failed_count += 1
                         logger.error(f"EXCLUSIVE_JOB: remove error {phone} from {group_name}: {e}")
 
             # --- Part 2: Reject duplicate pending requests ---
-            managed_jids = [g.group_jid for g in managed]
             rejected_count = 0
             for g in managed:
                 try:
                     requests = await wpp.get_membership_requests(g.group_jid)
                     if not isinstance(requests, list):
                         continue
-                    other_groups = [gj for gj in managed_jids if gj != g.group_jid]
                     for req in requests:
                         req_id = req.get('id', '') if isinstance(req, dict) else str(req)
                         req_phone = str(req_id).replace('@c.us','').replace('@s.whatsapp.net','').replace('@lid','').split('@')[0]
                         if not req_phone or len(req_phone) < 8:
                             continue
                         # Check if already in another group
-                        found = False
                         if req_phone in phone_groups:
-                            req_in_groups = [gj for gj, _, _ in phone_groups.get(req_phone, [])]
+                            req_in_groups = [gj for gj, _ in phone_groups.get(req_phone, [])]
                             if any(gj != g.group_jid for gj in req_in_groups):
-                                found = True
-                        if found:
-                            await asyncio.sleep(random.uniform(1.0, 3.0))
-                            await wpp.reject_participant(g.group_jid, req_id)
-                            rejected_count += 1
-                            _exclusivity_report["rejected_requests"].append({
-                                "phone": req_phone, "group": g.name or g.group_jid[:20],
-                                "time": datetime.now().strftime("%H:%M")
-                            })
-                            logger.info(f"EXCLUSIVE_JOB: rejected pending {req_phone} from {g.name}")
+                                await asyncio.sleep(random.uniform(1.0, 3.0))
+                                await wpp.reject_participant(g.group_jid, req_id)
+                                rejected_count += 1
+                                _exclusivity_report["rejected_requests"].append({
+                                    "phone": req_phone, "group": g.name or g.group_jid[:20],
+                                    "time": datetime.now().strftime("%H:%M")
+                                })
+                                logger.info(f"EXCLUSIVE_JOB: rejected pending {req_phone} from {g.name}")
                 except Exception as e:
-                    logger.error(f"EXCLUSIVE_JOB: pending scan error for {g.group_jid[:20]}: {e}")
+                    logger.error(f"EXCLUSIVE_JOB: pending scan error for {g.name}: {e}")
 
             _exclusivity_report["last_run"] = datetime.now().strftime("%H:%M:%S")
-            logger.info(f"EXCLUSIVE_JOB: done — {removed_count} removed, {rejected_count} rejected, {len(duplicates)} duplicates found")
+            logger.info(f"EXCLUSIVE_JOB: done — {removed_count} removed, {failed_count} failed, {rejected_count} rejected, {len(duplicates)} duplicates found")
         finally:
             db.close()
     except Exception as e:
@@ -1753,13 +1761,16 @@ async def api_clean_duplicates(username: str = Depends(get_current_username)):
             for group_jid, group_name, raw_id in groups[1:]:
                 try:
                     await asyncio.sleep(random.uniform(1.5, 3.0))  # Anti-ban delay
-                    logger.info(f"CLEAN_DUP: removing {phone} (raw_id={raw_id[:30]}) from {group_name}")
-                    success = await wpp.remove_participant(group_jid, raw_id)
+                    # USE phone@c.us format — raw @lid IDs don't work for removal
+                    participant_cus = f"{phone}@c.us"
+                    logger.info(f"CLEAN_DUP: removing {participant_cus} from {group_name}")
+                    success = await wpp.remove_participant(group_jid, participant_cus)
                     if success:
                         removed.append({"phone": phone, "removed_from": group_name, "kept_in": keep_group[1]})
-                        logger.info(f"CLEAN_DUP: removed {phone} from {group_name}, kept in {keep_group[1]}")
+                        logger.info(f"CLEAN_DUP: ✅ removed {phone} from {group_name}, kept in {keep_group[1]}")
                     else:
                         failed.append({"phone": phone, "group": group_name, "error": "API returned false"})
+                        logger.warning(f"CLEAN_DUP: ❌ FAILED {phone} from {group_name}")
                 except Exception as e:
                     failed.append({"phone": phone, "group": group_name, "error": str(e)})
 
@@ -1782,7 +1793,7 @@ async def api_exclusivity_report(username: str = Depends(get_current_username)):
 async def api_trigger_exclusive_cleanup(username: str = Depends(get_current_username)):
     """Manually trigger the exclusive cleanup job."""
     try:
-        await job_exclusive_cleanup()
+        await job_exclusive_cleanup(force=True)
         return _exclusivity_report
     except Exception as e:
         logger.error(f"Manual trigger error: {e}")
