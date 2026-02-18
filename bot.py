@@ -286,6 +286,24 @@ class WPPConnectClient:
                 logger.error(f"Error rejecting participant: {e}")
                 return False
 
+    async def get_membership_requests(self, group_id: str):
+        """Get pending membership approval requests for a group."""
+        url = f"{self.base_url}/api/{self.session}/get-membership-approval-requests/{group_id}"
+        logger.info(f"GET_MEMBERSHIP_REQUESTS: group={group_id}")
+        async with httpx.AsyncClient(timeout=30) as client:
+            try:
+                resp = await client.get(url, headers=self.headers)
+                logger.info(f"GET_MEMBERSHIP_REQUESTS response: {resp.status_code} - {resp.text[:300]}")
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if isinstance(data, dict):
+                        return data.get('response', data.get('data', []))
+                    return data if isinstance(data, list) else []
+                return []
+            except Exception as e:
+                logger.error(f"Error getting membership requests: {e}")
+                return []
+
     async def check_session_status(self) -> dict:
         """Check if the WPP session is connected. Returns dict with 'connected' bool and 'status' string."""
         url = f"{self.base_url}/api/{self.session}/check-connection-session"
@@ -1694,6 +1712,104 @@ async def api_sync_invite_links(username: str = Depends(get_current_username)):
     finally:
         db.close()
 
+@app.post("/api/admin/scan-pending-requests")
+async def api_scan_pending_requests(username: str = Depends(get_current_username)):
+    """Scan all managed groups for pending membership requests and approve/reject based on exclusivity."""
+    cfg = load_settings()
+    db = SessionLocal()
+    try:
+        managed = db.query(WhatsAppGroup).all()
+        if not managed:
+            return {"error": "Nenhum grupo gerenciado encontrado"}
+        
+        managed_jids = [g.group_jid for g in managed]
+        group_names = {g.group_jid: g.name for g in managed}
+        
+        # First, build member map for all groups
+        group_members = {}
+        for g in managed:
+            try:
+                members = await wpp.get_group_participants(g.group_jid)
+                if isinstance(members, list):
+                    ids = set()
+                    for m in members:
+                        if isinstance(m, dict):
+                            mid = m.get('id', m.get('_serialized', ''))
+                            if isinstance(mid, dict):
+                                mid = mid.get('_serialized', mid.get('user', ''))
+                            ids.add(str(mid).split('@')[0])
+                        elif isinstance(m, str):
+                            ids.add(m.split('@')[0])
+                    group_members[g.group_jid] = ids
+                    logger.info(f"SCAN_PENDING: {g.name} has {len(ids)} members")
+            except Exception as e:
+                logger.error(f"SCAN_PENDING: Error fetching members for {g.name}: {e}")
+        
+        # Now scan pending requests for each group
+        results = {"approved": [], "rejected": [], "errors": [], "groups_scanned": 0}
+        
+        for g in managed:
+            try:
+                pending = await wpp.get_membership_requests(g.group_jid)
+                if not pending:
+                    continue
+                
+                results["groups_scanned"] += 1
+                logger.info(f"SCAN_PENDING: {g.name} has {len(pending)} pending requests")
+                
+                for req in pending:
+                    req_id = ""
+                    if isinstance(req, dict):
+                        req_id = req.get('id', req.get('requester', req.get('participant', '')))
+                        if isinstance(req_id, dict):
+                            req_id = req_id.get('_serialized', req_id.get('user', ''))
+                    elif isinstance(req, str):
+                        req_id = req
+                    
+                    if not req_id:
+                        continue
+                    
+                    req_phone = str(req_id).split('@')[0]
+                    
+                    # Check if this person is in any other managed group
+                    found_in = None
+                    for other_jid, members in group_members.items():
+                        if other_jid != g.group_jid and req_phone in members:
+                            found_in = group_names.get(other_jid, other_jid)
+                            break
+                    
+                    if found_in and cfg.get("exclusive_groups_enabled", True):
+                        # Reject — duplicate
+                        logger.info(f"SCAN_PENDING_REJECT: {req_phone} in {found_in}, rejecting from {g.name}")
+                        await asyncio.sleep(random.uniform(1.0, 3.0))
+                        ok = await wpp.reject_participant(g.group_jid, req_id)
+                        results["rejected"].append({
+                            "phone": req_phone,
+                            "group": g.name,
+                            "already_in": found_in,
+                            "success": ok
+                        })
+                    else:
+                        # Approve — not duplicate
+                        logger.info(f"SCAN_PENDING_APPROVE: {req_phone} for {g.name}")
+                        await asyncio.sleep(random.uniform(0.5, 2.0))
+                        ok = await wpp.approve_participant(g.group_jid, req_id)
+                        results["approved"].append({
+                            "phone": req_phone,
+                            "group": g.name,
+                            "success": ok
+                        })
+            except Exception as e:
+                logger.error(f"SCAN_PENDING: Error scanning {g.name}: {e}")
+                results["errors"].append({"group": g.name, "error": str(e)})
+        
+        return results
+    except Exception as e:
+        logger.error(f"Error in scan-pending-requests: {e}")
+        return {"error": str(e)}
+    finally:
+        db.close()
+
 # --- Bot: Handle participant changes (join/leave) ---
 async def handle_participant_change(data: dict):
     """Process onparticipantschanged webhook to confirm affiliate joins and update member counts."""
@@ -1927,7 +2043,7 @@ async def handle_membership_request(group_id: str, participant_ids: list, manage
             logger.info(f"MEMBERSHIP_AUTO_APPROVED (exclusivity off): {pid[:20]} for {group_id[:20]}")
         return
     
-    reject_msg = cfg.get("exclusive_reject_message", "❌ Sua solicitação foi recusada pois você já faz parte de um dos nossos grupos. Não é permitido estar em mais de um grupo ao mesmo tempo.")
+    reject_msg = cfg.get("exclusive_reject_message", "")
     other_groups = [g for g in managed_jids if g != group_id]
     
     for participant_id in participant_ids:
@@ -1956,10 +2072,6 @@ async def handle_membership_request(group_id: str, participant_ids: list, manage
         if found_in:
             # REJECT — already in another managed group
             logger.info(f"MEMBERSHIP_REJECT: {participant_id[:20]} already in {found_in[:20]}, rejecting from {group_id[:20]}")
-            try:
-                await wpp.send_message(participant_id, reject_msg, skip_typing=True)
-            except Exception as e:
-                logger.error(f"Error sending reject msg: {e}")
             await asyncio.sleep(random.uniform(1.0, 3.0))
             rejected = await wpp.reject_participant(group_id, participant_id)
             if rejected:
@@ -1983,7 +2095,7 @@ async def check_exclusive_membership(joined_group: str, participant_ids: list, g
     if not cfg.get("exclusive_groups_enabled", True):
         return
     
-    remove_msg = cfg.get("exclusive_remove_message", "⚠️ Você já faz parte de um dos nossos grupos! Não é permitido estar em mais de um grupo ao mesmo tempo. Você foi removido do grupo que acabou de entrar.")
+    remove_msg = cfg.get("exclusive_remove_message", "")
     other_groups = [g for g in group_jids if g != joined_group]
     if not other_groups:
         return
@@ -2013,11 +2125,6 @@ async def check_exclusive_membership(joined_group: str, participant_ids: list, g
         
         if found_in:
             logger.info(f"EXCLUSIVE: {participant_id[:20]} already in {found_in[:20]}, removing from {joined_group[:20]}")
-            # Send message before removing
-            try:
-                await wpp.send_message(participant_id, remove_msg, skip_typing=True)
-            except Exception as e:
-                logger.error(f"Error sending exclusive msg: {e}")
             await asyncio.sleep(random.uniform(2.0, 5.0))  # Anti-ban delay
             removed = await wpp.remove_participant(joined_group, participant_id)
             if removed:

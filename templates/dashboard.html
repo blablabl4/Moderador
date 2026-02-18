@@ -962,6 +962,9 @@
                         </div>
                         <button onclick="checkDuplicates()" class="btn btn-green"
                             style="width:100%;margin-top:12px;font-size:12px;">🔍 Verificar Duplicatas</button>
+                        <button onclick="scanPendingRequests()" class="btn btn-green"
+                            style="width:100%;margin-top:8px;font-size:12px;background:#e94560;">🔄 Varrer Solicitações
+                            Pendentes</button>
                         <div id="duplicates-detail"
                             style="display:none;margin-top:12px;max-height:300px;overflow-y:auto;background:rgba(0,0,0,0.2);border-radius:8px;padding:10px;">
                         </div>
@@ -1449,6 +1452,59 @@
                     html += '</div>';
                     detail.innerHTML = html;
                 }
+                detail.style.display = 'block';
+            } catch (e) {
+                detail.innerHTML = `<p style="color:#e94560;">Erro: ${e}</p>`;
+                detail.style.display = 'block';
+            } finally {
+                btn.textContent = origText;
+                btn.disabled = false;
+            }
+        }
+
+        async function scanPendingRequests() {
+            const btn = event.target;
+            const origText = btn.textContent;
+            btn.textContent = '⏳ Varrendo...';
+            btn.disabled = true;
+            const detail = document.getElementById('duplicates-detail');
+
+            try {
+                const res = await fetch('/api/admin/scan-pending-requests', { method: 'POST' });
+                const data = await res.json();
+                if (data.error) {
+                    detail.innerHTML = `<p style="color:#e94560;">${data.error}</p>`;
+                    detail.style.display = 'block';
+                    return;
+                }
+
+                let html = `<p style="color:#00b4d8;font-size:13px;margin-bottom:8px;">📋 Resultado da varredura:</p>`;
+                html += `<p style="font-size:12px;color:#888;margin-bottom:8px;">${data.approved.length} aprovado(s) | ${data.rejected.length} rejeitado(s)</p>`;
+
+                if (data.rejected.length > 0) {
+                    html += '<p style="color:#e94560;font-size:12px;margin-bottom:4px;">❌ Rejeitados:</p>';
+                    for (const r of data.rejected) {
+                        html += `<div style="padding:4px 8px;margin-bottom:3px;background:rgba(233,69,96,0.1);border-radius:4px;font-size:11px;">`;
+                        html += `📱 ${r.phone} — ${r.group} (já em: ${r.already_in}) ${r.success ? '✅' : '❌'}`;
+                        html += `</div>`;
+                    }
+                }
+                if (data.approved.length > 0) {
+                    html += '<p style="color:#25D366;font-size:12px;margin-bottom:4px;margin-top:8px;">✅ Aprovados:</p>';
+                    for (const a of data.approved) {
+                        html += `<div style="padding:4px 8px;margin-bottom:3px;background:rgba(37,211,102,0.1);border-radius:4px;font-size:11px;">`;
+                        html += `📱 ${a.phone} — ${a.group} ${a.success ? '✅' : '❌'}`;
+                        html += `</div>`;
+                    }
+                }
+                if (data.errors.length > 0) {
+                    html += '<p style="color:#f5a623;font-size:12px;margin-top:8px;">⚠️ Erros:</p>';
+                    for (const e of data.errors) {
+                        html += `<div style="font-size:11px;color:#888;">${e.group}: ${e.error}</div>`;
+                    }
+                }
+
+                detail.innerHTML = html;
                 detail.style.display = 'block';
             } catch (e) {
                 detail.innerHTML = `<p style="color:#e94560;">Erro: ${e}</p>`;
