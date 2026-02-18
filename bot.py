@@ -258,6 +258,34 @@ class WPPConnectClient:
                 logger.error(f"Error removing participant: {e}")
                 return False
 
+    async def approve_participant(self, group_id: str, participant_id: str):
+        """Approve a pending membership request for a group."""
+        url = f"{self.base_url}/api/{self.session}/approve-participant-group"
+        payload = {"groupId": group_id, "participantId": [participant_id]}
+        logger.info(f"APPROVE_PARTICIPANT: group={group_id}, participant={participant_id}")
+        async with httpx.AsyncClient(timeout=30) as client:
+            try:
+                resp = await client.post(url, json=payload, headers=self.headers)
+                logger.info(f"APPROVE_PARTICIPANT response: {resp.status_code} - {resp.text[:200]}")
+                return resp.status_code == 200
+            except Exception as e:
+                logger.error(f"Error approving participant: {e}")
+                return False
+
+    async def reject_participant(self, group_id: str, participant_id: str):
+        """Reject a pending membership request for a group."""
+        url = f"{self.base_url}/api/{self.session}/reject-participant-group"
+        payload = {"groupId": group_id, "participantId": [participant_id]}
+        logger.info(f"REJECT_PARTICIPANT: group={group_id}, participant={participant_id}")
+        async with httpx.AsyncClient(timeout=30) as client:
+            try:
+                resp = await client.post(url, json=payload, headers=self.headers)
+                logger.info(f"REJECT_PARTICIPANT response: {resp.status_code} - {resp.text[:200]}")
+                return resp.status_code == 200
+            except Exception as e:
+                logger.error(f"Error rejecting participant: {e}")
+                return False
+
     async def check_session_status(self) -> dict:
         """Check if the WPP session is connected. Returns dict with 'connected' bool and 'status' string."""
         url = f"{self.base_url}/api/{self.session}/check-connection-session"
@@ -1865,6 +1893,60 @@ async def api_debug_group_admins(group_id: str, username: str = Depends(get_curr
     cached_ids = await get_group_admin_ids(group_id)
     return {"group_id": group_id, "raw_admins": raw_admins, "cached_ids": list(cached_ids)}
 
+async def handle_membership_request(group_id: str, participant_ids: list, managed_jids: list):
+    """Handle membership approval requests: approve if not duplicate, reject if already in another group."""
+    other_groups = [g for g in managed_jids if g != group_id]
+    
+    for participant_id in participant_ids:
+        p_identifiers = {participant_id, participant_id.split('@')[0]}
+        
+        found_in = None
+        if other_groups:
+            for other_group in other_groups:
+                try:
+                    members = await wpp.get_group_participants(other_group)
+                    if isinstance(members, list):
+                        for m in members:
+                            mid = m.get('id', '') if isinstance(m, dict) else str(m)
+                            muser = m.get('user', '') if isinstance(m, dict) else ''
+                            m_ids = {mid, mid.split('@')[0]}
+                            if muser:
+                                m_ids.add(muser)
+                            if p_identifiers & m_ids:
+                                found_in = other_group
+                                break
+                    if found_in:
+                        break
+                except Exception as e:
+                    logger.error(f"Membership request check error for group {other_group}: {e}")
+        
+        if found_in:
+            # REJECT — already in another managed group
+            logger.info(f"MEMBERSHIP_REJECT: {participant_id[:20]} already in {found_in[:20]}, rejecting from {group_id[:20]}")
+            try:
+                await wpp.send_message(
+                    participant_id,
+                    "❌ Sua solicitação foi recusada pois você já faz parte de um dos nossos grupos. Não é permitido estar em mais de um grupo ao mesmo tempo.",
+                    skip_typing=True
+                )
+            except Exception as e:
+                logger.error(f"Error sending reject msg: {e}")
+            await asyncio.sleep(random.uniform(1.0, 3.0))
+            rejected = await wpp.reject_participant(group_id, participant_id)
+            if rejected:
+                logger.info(f"MEMBERSHIP_REJECTED: {participant_id[:20]} from {group_id[:20]}")
+            else:
+                logger.error(f"MEMBERSHIP_REJECT_FAILED: {participant_id[:20]} from {group_id[:20]}")
+        else:
+            # APPROVE — not a duplicate
+            logger.info(f"MEMBERSHIP_APPROVE: {participant_id[:20]} not in any other group, approving for {group_id[:20]}")
+            await asyncio.sleep(random.uniform(0.5, 2.0))
+            approved = await wpp.approve_participant(group_id, participant_id)
+            if approved:
+                logger.info(f"MEMBERSHIP_APPROVED: {participant_id[:20]} for {group_id[:20]}")
+            else:
+                logger.error(f"MEMBERSHIP_APPROVE_FAILED: {participant_id[:20]} for {group_id[:20]}")
+
 async def check_exclusive_membership(joined_group: str, participant_ids: list, group_jids: list):
     """Background task: check if new participants are in other groups. Remove from newly joined if duplicate.
     Keeps the member in the group they were in longest (the older one)."""
@@ -1982,6 +2064,43 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
         
         _log_webhook(log_entry)
         return {"status": log_entry.get("status", "participant_event")}
+    
+    # --- Handle membership approval requests (pre-join duplicate check) ---
+    if event in ('onparticipantschanged', 'on-participants-changed'):
+        msg = data.get('response') or data.get('data') or data
+        action = msg.get('action', '') if isinstance(msg, dict) else ''
+        
+        if action == 'membership_approval_request':
+            group_id = msg.get('groupId', '') or msg.get('chatId', '')
+            who = msg.get('who', '') or msg.get('participantId', '')
+            
+            if isinstance(who, list):
+                participants = who
+            else:
+                participants = [who] if who else []
+            
+            log_entry["status"] = "membership_request"
+            log_entry["action"] = action
+            log_entry["group"] = group_id
+            log_entry["participants"] = [p[:20] for p in participants]
+            
+            # Load managed groups from DB
+            managed_jids = []
+            try:
+                db_req = SessionLocal()
+                managed_jids = [g.group_jid for g in db_req.query(WhatsAppGroup).all()]
+                db_req.close()
+            except Exception as e:
+                logger.error(f"Error loading managed groups for membership request: {e}")
+            
+            if managed_jids and group_id in managed_jids and participants:
+                background_tasks.add_task(
+                    handle_membership_request, group_id, participants, managed_jids
+                )
+                log_entry["status"] = "membership_request_check_queued"
+            
+            _log_webhook(log_entry)
+            return {"status": log_entry.get("status", "membership_request")}
     
     # Accept multiple message event formats
     message_events = ('onmessage', 'on-message', 'onanymessage', 'onmessage.data')
