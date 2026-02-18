@@ -203,13 +203,15 @@ class WPPConnectClient:
                 return []
 
     async def get_group_participants(self, group_id: str):
-        url = f"{self.base_url}/api/{self.session}/group-participants/{group_id}"
+        """Get group members. Uses group-members endpoint (group-participants returns 404)."""
+        url = f"{self.base_url}/api/{self.session}/group-members/{group_id}"
         async with httpx.AsyncClient(timeout=30) as client:
             try:
                 resp = await client.get(url, headers=self.headers)
                 if resp.status_code == 200:
                     data = resp.json()
                     return data.get('response', data) if isinstance(data, dict) else data
+                logger.warning(f"get_group_participants: status={resp.status_code} for {group_id[:20]}")
                 return []
             except Exception as e:
                 logger.error(f"Error getting participants for {group_id}: {e}")
@@ -2069,7 +2071,8 @@ async def handle_membership_request(group_id: str, participant_ids: list, manage
     other_groups = [g for g in managed_jids if g != group_id]
     
     for participant_id in participant_ids:
-        p_identifiers = {participant_id, participant_id.split('@')[0]}
+        p_phone = participant_id.replace('@c.us','').replace('@s.whatsapp.net','').replace('@lid','').split('@')[0]
+        p_identifiers = {participant_id, p_phone}
         
         found_in = None
         if other_groups:
@@ -2078,12 +2081,14 @@ async def handle_membership_request(group_id: str, participant_ids: list, manage
                     members = await wpp.get_group_participants(other_group)
                     if isinstance(members, list):
                         for m in members:
-                            mid = m.get('id', '') if isinstance(m, dict) else str(m)
-                            muser = m.get('user', '') if isinstance(m, dict) else ''
-                            m_ids = {mid, mid.split('@')[0]}
-                            if muser:
-                                m_ids.add(muser)
-                            if p_identifiers & m_ids:
+                            if isinstance(m, dict):
+                                mid_raw = m.get('id', '')
+                                if isinstance(mid_raw, dict):
+                                    mid_raw = mid_raw.get('_serialized', mid_raw.get('user', ''))
+                                m_phone = str(mid_raw).replace('@c.us','').replace('@s.whatsapp.net','').replace('@lid','').split('@')[0]
+                            else:
+                                m_phone = str(m).split('@')[0]
+                            if m_phone and m_phone in p_identifiers:
                                 found_in = other_group
                                 break
                     if found_in:
@@ -2117,8 +2122,7 @@ async def check_exclusive_membership(joined_group: str, participant_ids: list, g
         return
     
     for participant_id in participant_ids:
-        # Build identifier set for matching
-        p_identifiers = {participant_id, participant_id.split('@')[0]}
+        p_phone = participant_id.replace('@c.us','').replace('@s.whatsapp.net','').replace('@lid','').split('@')[0]
         
         found_in = None
         for other_group in other_groups:
@@ -2126,12 +2130,14 @@ async def check_exclusive_membership(joined_group: str, participant_ids: list, g
                 members = await wpp.get_group_participants(other_group)
                 if isinstance(members, list):
                     for m in members:
-                        mid = m.get('id', '') if isinstance(m, dict) else str(m)
-                        muser = m.get('user', '') if isinstance(m, dict) else ''
-                        m_ids = {mid, mid.split('@')[0]}
-                        if muser:
-                            m_ids.add(muser)
-                        if p_identifiers & m_ids:
+                        if isinstance(m, dict):
+                            mid_raw = m.get('id', '')
+                            if isinstance(mid_raw, dict):
+                                mid_raw = mid_raw.get('_serialized', mid_raw.get('user', ''))
+                            m_phone = str(mid_raw).replace('@c.us','').replace('@s.whatsapp.net','').replace('@lid','').split('@')[0]
+                        else:
+                            m_phone = str(m).split('@')[0]
+                        if m_phone and m_phone == p_phone:
                             found_in = other_group
                             break
                 if found_in:
