@@ -1033,11 +1033,20 @@
 
                     <hr style="border-color:#2a2a4a;margin:16px 0;">
 
-                    <button onclick="checkDuplicates()" class="btn btn-green" style="width:100%;font-size:12px;">🔍
-                        Verificar Duplicatas</button>
-                    <button onclick="scanPendingRequests()" class="btn btn-green"
-                        style="width:100%;margin-top:8px;font-size:12px;background:#e94560;">🔄 Varrer Solicitações
-                        Pendentes</button>
+                    <p style="font-size:11px;color:#25D366;margin-bottom:10px;">🤖 Limpeza automática a cada 10 min
+                        (membros duplicados + solicitações)</p>
+
+                    <div id="exclusivity-report"
+                        style="background:rgba(0,0,0,0.2);border-radius:8px;padding:10px;margin-bottom:12px;">
+                        <p style="font-size:12px;color:#888;">Carregando relatório...</p>
+                    </div>
+
+                    <div style="display:flex;gap:8px;">
+                        <button onclick="viewGroupMembers()" class="btn btn-green" style="flex:1;font-size:11px;">👥 Ver
+                            Membros</button>
+                        <button onclick="viewPendingRequests()" class="btn btn-green"
+                            style="flex:1;font-size:11px;background:#e94560;">📋 Ver Solicitações</button>
+                    </div>
                     <div id="exclusivity-results"
                         style="margin-top:12px;max-height:400px;overflow-y:auto;background:rgba(0,0,0,0.2);border-radius:8px;padding:10px;display:none;">
                     </div>
@@ -1401,42 +1410,78 @@
                 const settings = await sRes.json();
                 document.getElementById('redir-exclusive-enabled').checked = settings.exclusive_groups_enabled !== false;
             } catch (e) { console.error('Exclusivity settings load error:', e); }
+
+            // Load daily report
+            loadExclusivityReport();
         }
 
-        async function checkDuplicates() {
+        async function loadExclusivityReport() {
+            const div = document.getElementById('exclusivity-report');
+            try {
+                const res = await fetch('/api/admin/exclusivity-report');
+                const data = await res.json();
+
+                let html = '';
+                const removed = data.removed_members || [];
+                const rejected = data.rejected_requests || [];
+                const lastRun = data.last_run || 'Ainda não executou';
+
+                html += `<p style="font-size:11px;color:#888;margin-bottom:6px;">📅 Relatório de hoje — última execução: <strong style="color:#fff;">${lastRun}</strong></p>`;
+
+                if (removed.length === 0 && rejected.length === 0) {
+                    html += `<p style="font-size:12px;color:#25D366;">✅ Nenhum duplicado encontrado hoje.</p>`;
+                } else {
+                    if (removed.length > 0) {
+                        html += `<p style="font-size:12px;color:#ff6b35;margin-bottom:4px;">🧹 ${removed.length} membro(s) removido(s):</p>`;
+                        for (const r of removed) {
+                            html += `<div style="padding:3px 8px;margin-bottom:2px;background:rgba(255,107,53,0.1);border-radius:4px;font-size:10px;">`;
+                            html += `${r.time} — 📱 ${r.phone} removido de <strong>${r.removed_from}</strong> (mantido em ${r.kept_in})`;
+                            html += `</div>`;
+                        }
+                    }
+                    if (rejected.length > 0) {
+                        html += `<p style="font-size:12px;color:#e94560;margin-top:6px;margin-bottom:4px;">❌ ${rejected.length} solicitação(ões) rejeitada(s):</p>`;
+                        for (const r of rejected) {
+                            html += `<div style="padding:3px 8px;margin-bottom:2px;background:rgba(233,69,96,0.1);border-radius:4px;font-size:10px;">`;
+                            html += `${r.time} — 📱 ${r.phone} rejeitado de <strong>${r.group}</strong>`;
+                            html += `</div>`;
+                        }
+                    }
+                }
+
+                div.innerHTML = html;
+            } catch (e) {
+                div.innerHTML = `<p style="font-size:12px;color:#e94560;">Erro ao carregar relatório: ${e}</p>`;
+            }
+        }
+
+        async function viewGroupMembers() {
             const btn = event.target;
             const origText = btn.textContent;
-            btn.textContent = '⏳ Verificando...';
+            btn.textContent = '⏳ Carregando...';
             btn.disabled = true;
             const detail = document.getElementById('exclusivity-results');
 
             try {
-                const res = await fetch('/api/admin/group-duplicates');
+                const res = await fetch('/api/admin/group-members-list');
                 const data = await res.json();
-                if (data.error) {
-                    detail.innerHTML = `<p style="color:#e94560;">${data.error}</p>`;
-                    detail.style.display = 'block';
-                    return;
-                }
 
-                document.getElementById('redir-unique').textContent = data.unique_members || 0;
-                document.getElementById('redir-duplicates').textContent = data.duplicates_count || 0;
-
-                if (data.duplicates_count === 0) {
-                    detail.innerHTML = '<p style="color:#25D366;font-size:13px;">✅ Nenhum membro duplicado encontrado!</p>';
-                } else {
-                    let html = `<p style="color:#e94560;font-size:13px;margin-bottom:10px;">⚠️ ${data.duplicates_count} membro(s) duplicado(s):</p>`;
-                    html += '<div style="font-size:12px;">';
-                    for (const dup of data.duplicate_members) {
-                        html += `<div style="padding:6px 8px;margin-bottom:4px;background:rgba(233,69,96,0.1);border-radius:6px;border-left:3px solid #e94560;">`;
-                        html += `<strong style="color:#fff;">📱 ${dup.phone}</strong>`;
-                        html += `<br><span style="color:#888;">Em: ${dup.in_groups.join(' • ')}</span>`;
+                let html = `<p style="color:#00b4d8;font-size:13px;margin-bottom:10px;">👥 Membros por grupo:</p>`;
+                for (const g of data.groups) {
+                    html += `<div style="margin-bottom:10px;">`;
+                    html += `<p style="color:#fff;font-size:12px;font-weight:bold;margin-bottom:4px;">${g.name} — ${g.count} membros</p>`;
+                    if (g.error) {
+                        html += `<p style="color:#e94560;font-size:11px;">Erro: ${g.error}</p>`;
+                    } else {
+                        html += `<div style="max-height:150px;overflow-y:auto;background:rgba(0,0,0,0.15);border-radius:6px;padding:6px;">`;
+                        for (const phone of g.members) {
+                            html += `<div style="font-size:10px;color:#aaa;padding:1px 4px;">📱 ${phone}</div>`;
+                        }
                         html += `</div>`;
                     }
-                    html += '</div>';
-                    html += `<button onclick="cleanDuplicates()" class="btn btn-green" style="width:100%;margin-top:12px;font-size:12px;background:#ff6b35;">🧹 Limpar Duplicados (remover dos grupos extras)</button>`;
-                    detail.innerHTML = html;
+                    html += `</div>`;
                 }
+                detail.innerHTML = html;
                 detail.style.display = 'block';
             } catch (e) {
                 detail.innerHTML = `<p style="color:#e94560;">Erro: ${e}</p>`;
@@ -1447,90 +1492,39 @@
             }
         }
 
-        async function cleanDuplicates() {
+        async function viewPendingRequests() {
             const btn = event.target;
             const origText = btn.textContent;
-            btn.textContent = '⏳ Limpando...';
-            btn.disabled = true;
-
-            try {
-                const res = await fetch('/api/admin/clean-duplicates', { method: 'POST' });
-                const data = await res.json();
-                const detail = document.getElementById('exclusivity-results');
-
-                if (data.error) {
-                    detail.innerHTML += `<p style="color:#e94560;margin-top:8px;">Erro: ${data.error}</p>`;
-                    return;
-                }
-
-                let html = `<hr style="border-color:#2a2a4a;margin:12px 0;">`;
-                html += `<p style="color:#ff6b35;font-size:13px;margin-bottom:8px;">🧹 Resultado da limpeza:</p>`;
-                html += `<p style="font-size:12px;color:#888;margin-bottom:8px;">${data.removed.length} removido(s) | ${data.failed.length} falha(s)</p>`;
-
-                for (const r of data.removed) {
-                    html += `<div style="padding:4px 8px;margin-bottom:3px;background:rgba(255,107,53,0.1);border-radius:4px;font-size:11px;">`;
-                    html += `✅ ${r.phone} removido de ${r.removed_from}`;
-                    html += `</div>`;
-                }
-                for (const f of data.failed) {
-                    html += `<div style="padding:4px 8px;margin-bottom:3px;background:rgba(233,69,96,0.1);border-radius:4px;font-size:11px;">`;
-                    html += `❌ ${f.phone} falhou em ${f.group}: ${f.error || 'erro'}`;
-                    html += `</div>`;
-                }
-
-                detail.innerHTML += html;
-            } catch (e) {
-                alert('Erro na limpeza: ' + e);
-            } finally {
-                btn.textContent = origText;
-                btn.disabled = false;
-            }
-        }
-
-        async function scanPendingRequests() {
-            const btn = event.target;
-            const origText = btn.textContent;
-            btn.textContent = '⏳ Varrendo...';
+            btn.textContent = '⏳ Carregando...';
             btn.disabled = true;
             const detail = document.getElementById('exclusivity-results');
 
             try {
-                const res = await fetch('/api/admin/scan-pending-requests', { method: 'POST' });
-                if (!res.ok) {
-                    detail.innerHTML = `<p style="color:#e94560;">Erro: ${res.status} ${res.statusText}</p>`;
-                    detail.style.display = 'block';
-                    return;
-                }
+                const res = await fetch('/api/admin/pending-requests');
                 const data = await res.json();
-                if (data.error) {
-                    detail.innerHTML = `<p style="color:#e94560;">${data.error}</p>`;
-                    detail.style.display = 'block';
-                    return;
-                }
 
-                let html = `<p style="color:#00b4d8;font-size:13px;margin-bottom:8px;">📋 Resultado da varredura:</p>`;
-                const skipped = data.skipped || 0;
-                html += `<p style="font-size:12px;color:#888;margin-bottom:8px;">${data.rejected.length} rejeitado(s) | ${skipped} pendente(s) mantido(s)</p>`;
-
-                if (data.rejected.length > 0) {
-                    html += '<p style="color:#e94560;font-size:12px;margin-bottom:4px;">❌ Rejeitados (duplicados):</p>';
-                    for (const r of data.rejected) {
-                        html += `<div style="padding:4px 8px;margin-bottom:3px;background:rgba(233,69,96,0.1);border-radius:4px;font-size:11px;">`;
-                        html += `📱 ${r.phone} — ${r.group} (já em: ${r.already_in}) ${r.success ? '✅' : '❌'}`;
+                let html = `<p style="color:#e94560;font-size:13px;margin-bottom:10px;">📋 Solicitações pendentes:</p>`;
+                let totalPending = 0;
+                for (const g of data.groups) {
+                    totalPending += g.count;
+                    html += `<div style="margin-bottom:10px;">`;
+                    html += `<p style="color:#fff;font-size:12px;font-weight:bold;margin-bottom:4px;">${g.name} — ${g.count} pendente(s)</p>`;
+                    if (g.error) {
+                        html += `<p style="color:#e94560;font-size:11px;">Erro: ${g.error}</p>`;
+                    } else if (g.count > 0) {
+                        html += `<div style="background:rgba(0,0,0,0.15);border-radius:6px;padding:6px;">`;
+                        for (const req of g.pending) {
+                            html += `<div style="font-size:10px;color:#f5a623;padding:1px 4px;">⏳ ${req.phone}</div>`;
+                        }
                         html += `</div>`;
+                    } else {
+                        html += `<p style="font-size:11px;color:#888;">Nenhuma solicitação.</p>`;
                     }
-                } else if (skipped > 0) {
-                    html += '<p style="color:#25D366;font-size:13px;">✅ Nenhum duplicado nas solicitações pendentes.</p>';
-                } else {
-                    html += '<p style="color:#888;font-size:13px;">Nenhuma solicitação pendente encontrada.</p>';
+                    html += `</div>`;
                 }
-                if (data.errors && data.errors.length > 0) {
-                    html += '<p style="color:#f5a623;font-size:12px;margin-top:8px;">⚠️ Erros:</p>';
-                    for (const e of data.errors) {
-                        html += `<div style="font-size:11px;color:#888;">${e.group}: ${e.error}</div>`;
-                    }
+                if (totalPending === 0) {
+                    html = `<p style="color:#25D366;font-size:13px;">✅ Nenhuma solicitação pendente em nenhum grupo.</p>`;
                 }
-
                 detail.innerHTML = html;
                 detail.style.display = 'block';
             } catch (e) {
