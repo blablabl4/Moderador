@@ -1462,34 +1462,78 @@
         async function triggerExclusiveCleanup() {
             const btn = event.target;
             const origText = btn.textContent;
-            btn.textContent = '⏳ Executando varredura...';
+            btn.textContent = '⏳ Iniciando varredura...';
             btn.disabled = true;
 
             try {
                 const res = await fetch('/api/admin/trigger-exclusive-cleanup', { method: 'POST' });
                 const data = await res.json();
 
-                if (data.error) {
-                    alert('Erro: ' + data.error);
-                    return;
+                if (data.status === 'already_running') {
+                    btn.textContent = '🔄 Já em execução...';
                 }
 
-                // Refresh the report display
-                await loadExclusivityReport();
+                // Poll report every 3 seconds until last_run changes
+                const startTime = Date.now();
+                let lastRun = null;
 
-                // Also refresh stats
+                // Get initial last_run value
                 try {
-                    const dRes = await fetch('/api/admin/group-duplicates');
-                    const dData = await dRes.json();
-                    if (!dData.error) {
-                        document.getElementById('redir-unique').textContent = dData.unique_members || 0;
-                        document.getElementById('redir-duplicates').textContent = dData.duplicates_count || 0;
-                    }
+                    const rr = await fetch('/api/admin/exclusivity-report');
+                    const rd = await rr.json();
+                    lastRun = rd.last_run;
                 } catch (e) { }
+
+                let polls = 0;
+                const maxPolls = 120; // max ~6 min
+                const pollInterval = setInterval(async () => {
+                    polls++;
+                    const elapsed = Math.floor((Date.now() - startTime) / 1000);
+                    btn.textContent = `⏳ Varrendo... (${elapsed}s)`;
+
+                    try {
+                        const rr = await fetch('/api/admin/exclusivity-report');
+                        const rd = await rr.json();
+
+                        // Update report in real-time
+                        const removed = rd.removed_members || [];
+                        const rejected = rd.rejected_requests || [];
+                        const reportDiv = document.getElementById('exclusivity-report');
+                        let html = `<p style="font-size:11px;color:#f5a623;margin-bottom:6px;">⏳ Varredura em andamento... (${elapsed}s)</p>`;
+                        if (removed.length > 0 || rejected.length > 0) {
+                            html += `<p style="font-size:12px;color:#ff6b35;">${removed.length} removido(s), ${rejected.length} rejeitado(s) até agora</p>`;
+                        }
+                        reportDiv.innerHTML = html;
+
+                        // Check if job finished (last_run changed)
+                        if (rd.last_run && rd.last_run !== lastRun) {
+                            clearInterval(pollInterval);
+                            btn.textContent = origText;
+                            btn.disabled = false;
+                            await loadExclusivityReport();
+
+                            // Refresh duplicate stats
+                            try {
+                                const dRes = await fetch('/api/admin/group-duplicates');
+                                const dData = await dRes.json();
+                                if (!dData.error) {
+                                    document.getElementById('redir-unique').textContent = dData.unique_members || 0;
+                                    document.getElementById('redir-duplicates').textContent = dData.duplicates_count || 0;
+                                }
+                            } catch (e) { }
+                        }
+                    } catch (e) { }
+
+                    if (polls >= maxPolls) {
+                        clearInterval(pollInterval);
+                        btn.textContent = origText;
+                        btn.disabled = false;
+                        await loadExclusivityReport();
+                    }
+                }, 3000);
 
             } catch (e) {
                 alert('Erro na varredura: ' + e);
-            } finally {
                 btn.textContent = origText;
                 btn.disabled = false;
             }

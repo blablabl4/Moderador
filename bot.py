@@ -659,6 +659,7 @@ _exclusivity_report = {
     "rejected_requests": [],  # {"phone", "group", "time"}
     "last_run": None
 }
+_exclusivity_running = False
 
 async def job_exclusive_cleanup(force=False):
     """Automatic job: remove duplicate members and reject duplicate pending requests."""
@@ -1786,18 +1787,30 @@ async def api_exclusivity_report(username: str = Depends(get_current_username)):
     """Return today's exclusivity cleanup report."""
     today = datetime.now().strftime("%Y-%m-%d")
     if _exclusivity_report["date"] != today:
-        return {"date": today, "removed_members": [], "rejected_requests": [], "last_run": None}
-    return _exclusivity_report
+        return {"date": today, "removed_members": [], "rejected_requests": [], "last_run": None, "running": _exclusivity_running}
+    report = dict(_exclusivity_report)
+    report["running"] = _exclusivity_running
+    return report
 
 @app.post("/api/admin/trigger-exclusive-cleanup")
 async def api_trigger_exclusive_cleanup(username: str = Depends(get_current_username)):
-    """Manually trigger the exclusive cleanup job."""
-    try:
-        await job_exclusive_cleanup(force=True)
-        return _exclusivity_report
-    except Exception as e:
-        logger.error(f"Manual trigger error: {e}")
-        return {"error": str(e)}
+    """Manually trigger the exclusive cleanup job (runs in background)."""
+    global _exclusivity_running
+    if _exclusivity_running:
+        return {"status": "already_running", "message": "Já está em execução"}
+    _exclusivity_running = True
+
+    async def _run():
+        global _exclusivity_running
+        try:
+            await job_exclusive_cleanup(force=True)
+        except Exception as e:
+            logger.error(f"Manual trigger error: {e}")
+        finally:
+            _exclusivity_running = False
+
+    asyncio.create_task(_run())
+    return {"status": "started", "message": "Varredura iniciada em background"}
 
 @app.get("/api/admin/group-members-list")
 async def api_group_members_list(username: str = Depends(get_current_username)):
