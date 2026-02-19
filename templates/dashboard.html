@@ -1254,6 +1254,25 @@
             </div>
             <div class="card-body">
                 <div class="roulette-container">
+                    <!-- Group Selector -->
+                    <div style="width:100%;max-width:500px;">
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                            <span
+                                style="font-size:13px;font-weight:600;color:#e94560;text-transform:uppercase;letter-spacing:0.5px;">📱
+                                Selecione os Grupos</span>
+                            <div style="display:flex;gap:8px;">
+                                <button onclick="toggleAllRouletteGroups(true)" class="btn btn-outline"
+                                    style="width:auto;margin:0;padding:4px 10px;font-size:11px;">✅ Todos</button>
+                                <button onclick="toggleAllRouletteGroups(false)" class="btn btn-outline"
+                                    style="width:auto;margin:0;padding:4px 10px;font-size:11px;">❌ Nenhum</button>
+                            </div>
+                        </div>
+                        <div id="roleta-groups-picker"
+                            style="max-height:180px;overflow-y:auto;background:rgba(0,0,0,0.2);border-radius:10px;padding:6px;border:1px solid rgba(255,255,255,0.06);">
+                            <div style="color:#666;padding:10px;text-align:center;">⏳ Carregando grupos...</div>
+                        </div>
+                    </div>
+
                     <!-- Stats -->
                     <div class="roulette-stats">
                         <div class="roulette-stat">
@@ -1279,9 +1298,9 @@
                         </div>
                     </div>
 
-                    <div id="roleta-placeholder" style="text-align:center;color:#666;padding:40px 20px;">
-                        <div style="font-size:48px;margin-bottom:12px;">🎰</div>
-                        <p>Clique em <strong>"Carregar Membros"</strong> para buscar os números de telefone.</p>
+                    <div id="roleta-placeholder" style="text-align:center;color:#666;padding:20px;">
+                        <p style="font-size:13px;">Selecione os grupos acima e clique em <strong>"Carregar
+                                Membros"</strong></p>
                     </div>
 
                     <!-- Spin Button -->
@@ -2020,12 +2039,54 @@
         let _rouletteMembers = [];
         let _rouletteSpinning = false;
         let _currentRotation = 0;
+        let _rouletteGroupsLoaded = false;
+
+        async function loadRouletteGroups() {
+            if (_rouletteGroupsLoaded) return;
+            try {
+                const res = await fetch('/api/groups/list');
+                const data = await res.json();
+                const picker = document.getElementById('roleta-groups-picker');
+                if (data.groups && data.groups.length > 0) {
+                    picker.innerHTML = data.groups.map(g => `
+                        <label style="display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:8px;cursor:pointer;transition:background 0.15s;border-bottom:1px solid rgba(255,255,255,0.03);" onmouseover="this.style.background='rgba(255,255,255,0.04)'" onmouseout="this.style.background='transparent'">
+                            <input type="checkbox" class="roleta-group-cb" value="${g.id}" checked style="accent-color:#e94560;width:16px;height:16px;">
+                            <div style="flex:1;min-width:0;">
+                                <div style="font-size:13px;font-weight:600;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${g.name}</div>
+                            </div>
+                            <div style="font-size:12px;font-weight:700;color:#888;white-space:nowrap;">${g.size || '?'} 👥</div>
+                        </label>
+                    `).join('');
+                    _rouletteGroupsLoaded = true;
+                } else {
+                    picker.innerHTML = '<div style="color:#666;padding:10px;text-align:center;">Nenhum grupo encontrado.</div>';
+                }
+            } catch (e) {
+                document.getElementById('roleta-groups-picker').innerHTML = '<div style="color:#e94560;padding:8px;">Erro: ' + e + '</div>';
+            }
+        }
+
+        function toggleAllRouletteGroups(checked) {
+            document.querySelectorAll('.roleta-group-cb').forEach(cb => cb.checked = checked);
+        }
 
         async function loadRouletteMembers() {
-            document.getElementById('roleta-placeholder').innerHTML = '<div style="color:#f5a623;font-size:14px;">⏳ Buscando membros de todos os grupos...</div>';
+            // Collect selected group IDs
+            const selectedIds = Array.from(document.querySelectorAll('.roleta-group-cb:checked')).map(cb => cb.value);
+            if (selectedIds.length === 0) {
+                alert('Selecione pelo menos um grupo!');
+                return;
+            }
+
+            document.getElementById('roleta-placeholder').innerHTML = '<div style="color:#f5a623;font-size:14px;">⏳ Buscando membros de ' + selectedIds.length + ' grupo(s)...</div>';
+            document.getElementById('roleta-placeholder').style.display = 'block';
             document.getElementById('btn-spin').disabled = true;
             try {
-                const res = await fetch('/api/admin/unique-members');
+                const res = await fetch('/api/admin/unique-members', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ group_ids: selectedIds })
+                });
                 const data = await res.json();
                 _rouletteMembers = data.members || [];
                 document.getElementById('roleta-total').textContent = data.total || 0;
@@ -2042,7 +2103,7 @@
                 document.getElementById('roulette-viewport').style.display = 'block';
                 document.getElementById('btn-spin').disabled = false;
                 document.getElementById('winner-display').classList.remove('show');
-                log('🎰 Roleta: ' + _rouletteMembers.length + ' membros carregados');
+                log('🎰 Roleta: ' + _rouletteMembers.length + ' membros únicos de ' + selectedIds.length + ' grupos');
             } catch (e) {
                 document.getElementById('roleta-placeholder').innerHTML = '<div style="color:#e94560;">Erro: ' + e + '</div>';
             }
@@ -2156,10 +2217,7 @@
                 setTimeout(loadBotGroups, 300);
             }
             if (tab === 'roleta') {
-                // Auto-load if not loaded yet
-                if (_rouletteMembers.length === 0) {
-                    loadRouletteMembers();
-                }
+                loadRouletteGroups();
             }
         };
 

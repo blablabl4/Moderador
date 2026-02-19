@@ -1911,11 +1911,18 @@ async def api_group_members_list(username: str = Depends(get_current_username)):
     finally:
         db.close()
 
-@app.get("/api/admin/unique-members")
-async def api_unique_members(username: str = Depends(get_current_username)):
-    """Get unique member phone numbers across ALL bot groups (excluding admins). Used by roulette."""
+@app.post("/api/admin/unique-members")
+async def api_unique_members(request: Request, username: str = Depends(get_current_username)):
+    """Get unique member phone numbers across selected bot groups (excluding admins). Used by roulette."""
     await ensure_token()
     try:
+        body = {}
+        try:
+            body = await request.json()
+        except Exception:
+            pass
+        filter_ids = body.get("group_ids", [])  # Empty = all groups
+
         all_groups = await wpp.get_all_groups()
         if not all_groups:
             return {"members": [], "total": 0, "groups_scanned": 0}
@@ -1932,6 +1939,10 @@ async def api_unique_members(username: str = Depends(get_current_username)):
                 gid = g
             if gid:
                 group_ids.append(str(gid))
+
+        # Filter by selected groups if provided
+        if filter_ids:
+            group_ids = [gid for gid in group_ids if gid in filter_ids]
 
         # Collect admin phones to exclude
         admin_phones = set(get_super_admins())
