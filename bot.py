@@ -1913,19 +1913,31 @@ async def api_group_members_list(username: str = Depends(get_current_username)):
 
 @app.get("/api/admin/unique-members")
 async def api_unique_members(username: str = Depends(get_current_username)):
-    """Get unique member phone numbers across all managed groups (excluding admins). Used by roulette."""
+    """Get unique member phone numbers across ALL bot groups (excluding admins). Used by roulette."""
     await ensure_token()
-    db = SessionLocal()
     try:
-        managed = db.query(WhatsAppGroup).all()
-        if not managed:
+        all_groups = await wpp.get_all_groups()
+        if not all_groups:
             return {"members": [], "total": 0, "groups_scanned": 0}
+
+        # Parse group IDs
+        group_ids = []
+        for g in all_groups:
+            gid = ""
+            if isinstance(g, dict):
+                gid = g.get("id", g.get("_serialized", ""))
+                if isinstance(gid, dict):
+                    gid = gid.get("_serialized", "")
+            elif isinstance(g, str):
+                gid = g
+            if gid:
+                group_ids.append(str(gid))
 
         # Collect admin phones to exclude
         admin_phones = set(get_super_admins())
-        for g in managed:
+        for gid in group_ids:
             try:
-                admins_raw = await wpp.get_group_admins(g.group_jid)
+                admins_raw = await wpp.get_group_admins(gid)
                 if isinstance(admins_raw, list) and len(admins_raw) > 0 and isinstance(admins_raw[0], list):
                     admins_raw = admins_raw[0]
                 if isinstance(admins_raw, list):
@@ -1943,9 +1955,9 @@ async def api_unique_members(username: str = Depends(get_current_username)):
         # Collect all unique phones across groups
         all_phones = set()
         groups_scanned = 0
-        for g in managed:
+        for gid in group_ids:
             try:
-                members_raw = await wpp.get_group_participants(g.group_jid)
+                members_raw = await wpp.get_group_participants(gid)
                 if isinstance(members_raw, list):
                     groups_scanned += 1
                     for m in members_raw:
@@ -1959,7 +1971,7 @@ async def api_unique_members(username: str = Depends(get_current_username)):
                         if phone and len(phone) >= 8:
                             all_phones.add(phone)
             except Exception as e:
-                logger.error(f"UNIQUE_MEMBERS: error fetching {g.name}: {e}")
+                logger.error(f"UNIQUE_MEMBERS: error fetching {gid[:25]}: {e}")
 
         # Remove admins
         unique = sorted(all_phones - admin_phones)
@@ -1968,8 +1980,6 @@ async def api_unique_members(username: str = Depends(get_current_username)):
     except Exception as e:
         logger.error(f"UNIQUE_MEMBERS error: {e}")
         return {"members": [], "total": 0, "error": str(e)}
-    finally:
-        db.close()
 
 @app.get("/api/admin/pending-requests")
 async def api_pending_requests(username: str = Depends(get_current_username)):
