@@ -966,10 +966,8 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(job_close_groups, 'cron', hour=20, minute=0)
     scheduler.add_job(job_watchdog, 'interval', minutes=5, id='watchdog')
     scheduler.add_job(job_sync_invite_links, 'interval', minutes=10, id='sync_invite_links')
-    # DISABLED: exclusive_cleanup was removing admins. Re-enable after confirming fix.
-    # scheduler.add_job(job_exclusive_cleanup, 'interval', minutes=10, id='exclusive_cleanup')
     scheduler.start()
-    logger.info("Scheduler started: watchdog(5m), invite_sync(10m), exclusive_cleanup(10m)")
+    logger.info("Scheduler started: watchdog(5m), invite_sync(10m). exclusive_cleanup=MANUAL_ONLY")
     
     async def startup_sequence():
         await wpp.start_session()

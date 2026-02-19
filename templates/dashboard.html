@@ -1014,27 +1014,11 @@
 
             <!-- Exclusivity Control -->
             <div class="card">
-                <div class="card-title">🚫 Controle de Exclusividade</div>
+                <div class="card-title">🚫 Limpeza de Duplicados</div>
                 <div class="card-body">
-                    <p style="color:#888;font-size:12px;margin-bottom:16px;">Impede que um membro esteja em mais de um
-                        grupo ao mesmo tempo. O bot rejeita a solicitação de entrada e remove quem entrar em duplicata.
+                    <p style="color:#888;font-size:12px;margin-bottom:16px;">Remove membros que estão em mais de um
+                        grupo. Administradores são excluídos automaticamente. O membro é mantido no grupo mais antigo.
                     </p>
-
-                    <div class="setting-row">
-                        <div class="setting-label">Exclusividade ativa<small>Liga/desliga a verificação de membros
-                                duplicados</small></div>
-                        <label class="setting-toggle"><input type="checkbox" id="redir-exclusive-enabled" checked><span
-                                class="toggle-slider"></span></label>
-                    </div>
-                    <div style="margin-top:12px;text-align:center;">
-                        <button class="btn-save" onclick="saveExclusivitySettings()">💾 Salvar</button>
-                        <div class="save-feedback" id="excl-save-feedback">✅ Configurações salvas!</div>
-                    </div>
-
-                    <hr style="border-color:#2a2a4a;margin:16px 0;">
-
-                    <p style="font-size:11px;color:#25D366;margin-bottom:10px;">🤖 Limpeza automática a cada 10 min
-                        (membros duplicados + solicitações)</p>
 
                     <div id="exclusivity-report"
                         style="background:rgba(0,0,0,0.2);border-radius:8px;padding:10px;margin-bottom:12px;">
