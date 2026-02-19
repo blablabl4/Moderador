@@ -782,16 +782,25 @@ async def job_exclusive_cleanup(force=False):
                         return str(mid)
                 return ''
 
-            def is_admin(member):
-                """Check if a member is admin or superadmin in their group."""
-                if isinstance(member, dict):
-                    return member.get('isAdmin', False) or member.get('isSuperAdmin', False)
-                return False
-
             # --- Part 1: Remove duplicate members ---
+            # First, fetch admins from ALL groups using the DEDICATED endpoint
+            admin_phones = set()
+            for g in managed:
+                try:
+                    admins_raw = await wpp.get_group_admins(g.group_jid)
+                    if isinstance(admins_raw, list):
+                        for a in admins_raw:
+                            admin_phone = extract_phone(a)
+                            if admin_phone and len(admin_phone) >= 8:
+                                admin_phones.add(admin_phone)
+                        logger.info(f"EXCLUSIVE_JOB: {g.name} has {len(admins_raw)} admin(s)")
+                except Exception as e:
+                    logger.error(f"EXCLUSIVE_JOB: error fetching admins for {g.name}: {e}")
+
+            logger.info(f"EXCLUSIVE_JOB: total admin phones to EXCLUDE: {len(admin_phones)} -> {list(admin_phones)[:10]}")
+
             # Build phone -> list of (group_jid, group_name, raw_id)
             phone_groups = {}
-            admin_phones = set()  # Track all admins to EXCLUDE from duplicates
             for g in managed:
                 try:
                     members_raw = await wpp.get_group_participants(g.group_jid)
@@ -804,17 +813,11 @@ async def job_exclusive_cleanup(force=False):
                             phone = extract_phone(m)
                             raw_id = extract_raw_id(m)
                             if phone and len(phone) >= 8:
-                                # Track admins — they should be in ALL groups
-                                if is_admin(m):
-                                    admin_phones.add(phone)
-                                    logger.debug(f"EXCLUSIVE_JOB: admin detected: {phone} in {g.name}")
                                 if phone not in phone_groups:
                                     phone_groups[phone] = []
                                 phone_groups[phone].append((g.group_jid, g.name or g.group_jid[:20], raw_id))
                 except Exception as e:
                     logger.error(f"EXCLUSIVE_JOB: error fetching {g.name}: {e}")
-
-            logger.info(f"EXCLUSIVE_JOB: detected {len(admin_phones)} admin(s) to EXCLUDE: {list(admin_phones)[:10]}")
 
             # Exclude admins from duplicate detection — they MUST stay in all groups
             duplicates = {p: gs for p, gs in phone_groups.items() if len(gs) >= 2 and p not in admin_phones}
@@ -1750,9 +1753,21 @@ async def api_group_duplicates(username: str = Depends(get_current_username)):
                             return str(val).split('@')[0]
             return None
         
+        # First, fetch admins using DEDICATED endpoint
+        admin_phones = set()
+        for g in managed:
+            try:
+                admins_raw = await wpp.get_group_admins(g.group_jid)
+                if isinstance(admins_raw, list):
+                    for a in admins_raw:
+                        admin_phone = extract_phone(a)
+                        if admin_phone and len(admin_phone) > 3:
+                            admin_phones.add(admin_phone)
+            except Exception:
+                pass
+
         # Fetch members for each managed group
         group_members = {}
-        admin_phones = set()  # Track admins to exclude from duplicates
         debug_info = []
         
         for g in managed:
@@ -1766,9 +1781,6 @@ async def api_group_duplicates(username: str = Depends(get_current_username)):
                         phone = extract_phone(m)
                         if phone and len(phone) > 3:  # Skip empty/invalid
                             ids.add(phone)
-                            # Track admins
-                            if isinstance(m, dict) and (m.get('isAdmin', False) or m.get('isSuperAdmin', False)):
-                                admin_phones.add(phone)
                     group_members[g.group_jid] = {
                         "name": g.name,
                         "ids": ids,
