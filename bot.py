@@ -247,44 +247,60 @@ class WPPConnectClient:
                 return ""
 
     async def remove_participant(self, group_id: str, participant_id: str):
-        """Remove a participant from a group. Tries multiple ID formats."""
+        """Remove a participant from a group.
+        WPPConnect Server expects: POST {groupId, phone} where phone is a bare number.
+        contactToArray() on server side adds @c.us (<=14 chars) or @lid (>14 chars).
+        """
         url = f"{self.base_url}/api/{self.session}/remove-participant-group"
 
-        # Build list of ID formats to try
+        # Extract the bare number (strip @c.us, @lid, @s.whatsapp.net etc)
         base = participant_id.split('@')[0]
-        formats_to_try = []
-        # Add the original ID as-is first
-        formats_to_try.append(participant_id)
-        # Then try other formats
-        if not participant_id.endswith('@c.us'):
-            formats_to_try.append(f"{base}@c.us")
-        if not participant_id.endswith('@lid'):
-            formats_to_try.append(f"{base}@lid")
+
+        # Try multiple formats:
+        # 1. Bare number (WPPConnect's contactToArray will auto-add @c.us or @lid)
+        # 2. Full ID with @lid suffix (in case server version handles it directly)
+        # 3. Full ID with @c.us suffix
+        formats_to_try = [
+            base,                # bare number — let server decide @c.us vs @lid
+            f"{base}@lid",       # explicit LID format
+            f"{base}@c.us",      # explicit phone format
+        ]
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_formats = []
+        for f in formats_to_try:
+            if f not in seen:
+                seen.add(f)
+                unique_formats.append(f)
 
         async with httpx.AsyncClient(timeout=30) as client:
-            for fmt in formats_to_try:
+            for fmt in unique_formats:
                 try:
-                    payload = {"groupId": group_id, "participantId": [fmt]}
-                    logger.info(f"REMOVE_PARTICIPANT: group={group_id[:30]}, participant={fmt}")
+                    # WPPConnect expects "phone" field, NOT "participantId"
+                    payload = {"groupId": group_id, "phone": fmt}
+                    logger.info(f"REMOVE_PARTICIPANT: group={group_id[:30]}, phone={fmt}")
                     resp = await client.post(url, json=payload, headers=self.headers)
-                    body = resp.text[:300]
+                    body = resp.text[:500]
                     logger.info(f"REMOVE_PARTICIPANT response: status={resp.status_code}, body={body}")
 
-                    # Accept any 2xx as success
+                    # Accept any 2xx as potential success
                     if 200 <= resp.status_code < 300:
-                        # Also check body for error indicators
                         body_lower = body.lower()
-                        if 'error' not in body_lower or 'not' not in body_lower:
-                            logger.info(f"REMOVE_PARTICIPANT: ✅ SUCCESS with format {fmt}")
+                        if '"status":"success"' in body_lower or '"success"' in body_lower:
+                            logger.info(f"REMOVE_PARTICIPANT: ✅ SUCCESS with phone={fmt}")
                             return True
-                        else:
-                            logger.warning(f"REMOVE_PARTICIPANT: 2xx but body has error: {body}")
+                        elif '"error"' in body_lower and '"status":"error"' in body_lower:
+                            logger.warning(f"REMOVE_PARTICIPANT: 2xx but server error in body with phone={fmt}: {body}")
                             continue
+                        else:
+                            # 2xx without clear error — treat as success
+                            logger.info(f"REMOVE_PARTICIPANT: ✅ 2xx assumed success with phone={fmt}")
+                            return True
                     else:
-                        logger.warning(f"REMOVE_PARTICIPANT: status {resp.status_code} with format {fmt}")
+                        logger.warning(f"REMOVE_PARTICIPANT: HTTP {resp.status_code} with phone={fmt}, body={body}")
                         continue
                 except Exception as e:
-                    logger.error(f"REMOVE_PARTICIPANT error with format {fmt}: {e}")
+                    logger.error(f"REMOVE_PARTICIPANT error with phone={fmt}: {e}")
                     continue
 
         logger.error(f"REMOVE_PARTICIPANT: ALL formats failed for {participant_id} in {group_id[:30]}")
