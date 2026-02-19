@@ -679,36 +679,47 @@
             font-size: 11px;
             color: #888;
             text-transform: uppercase;
-            letter-spacing: 0.5px;
             margin-top: 4px;
         }
 
         .roulette-viewport {
-            width: 340px;
-            height: 340px;
+            width: 500px;
+            max-width: 90vw;
+            height: 300px;
             perspective: 900px;
             position: relative;
             margin: 10px auto;
             overflow: hidden;
-            border-radius: 50%;
+            border-radius: 16px;
             background: radial-gradient(circle, #1a1a2e 0%, #0f0f1a 100%);
-            border: 3px solid #2a2a4a;
+            border: 2px solid #2a2a4a;
             box-shadow: 0 0 40px rgba(233, 69, 96, 0.15), inset 0 0 60px rgba(0, 0, 0, 0.5);
         }
 
-        /* Pointer arrow */
-        .roulette-pointer {
+        /* Side triangle pointers */
+        .roulette-pointer-left,
+        .roulette-pointer-right {
             position: absolute;
-            top: 0;
-            left: 50%;
-            transform: translateX(-50%);
+            top: 50%;
+            transform: translateY(-50%);
             width: 0;
             height: 0;
-            border-left: 16px solid transparent;
-            border-right: 16px solid transparent;
-            border-top: 30px solid #e94560;
             z-index: 10;
-            filter: drop-shadow(0 4px 8px rgba(233, 69, 96, 0.6));
+            filter: drop-shadow(0 0 8px rgba(233, 69, 96, 0.6));
+        }
+
+        .roulette-pointer-left {
+            left: 0;
+            border-top: 18px solid transparent;
+            border-bottom: 18px solid transparent;
+            border-left: 28px solid #e94560;
+        }
+
+        .roulette-pointer-right {
+            right: 0;
+            border-top: 18px solid transparent;
+            border-bottom: 18px solid transparent;
+            border-right: 28px solid #e94560;
         }
 
         .roulette-scene {
@@ -1261,7 +1272,8 @@
 
                     <!-- 3D Roulette -->
                     <div class="roulette-viewport" id="roulette-viewport" style="display:none;">
-                        <div class="roulette-pointer"></div>
+                        <div class="roulette-pointer-left"></div>
+                        <div class="roulette-pointer-right"></div>
                         <div class="roulette-scene">
                             <div class="roulette-cylinder" id="roulette-cylinder"></div>
                         </div>
