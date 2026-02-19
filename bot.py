@@ -749,7 +749,7 @@ async def job_exclusive_cleanup(force=False):
 
         db = SessionLocal()
         try:
-            managed = db.query(WhatsAppGroup).all()
+            managed = db.query(WhatsAppGroup).order_by(WhatsAppGroup.display_order.asc()).all()
             if len(managed) < 2:
                 logger.info(f"EXCLUSIVE_JOB: only {len(managed)} managed group(s), skipping.")
                 return
