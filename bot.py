@@ -335,22 +335,43 @@ class WPPConnectClient:
                 return False
 
     async def get_membership_requests(self, group_id: str):
-        """Get pending membership approval requests for a group."""
-        url = f"{self.base_url}/api/{self.session}/get-membership-approval-requests/{group_id}"
-        logger.info(f"GET_MEMBERSHIP_REQUESTS: group={group_id}")
+        """Get pending membership approval requests for a group.
+        NOTE: Standard WPPConnect Server may not have this endpoint.
+        We try multiple possible endpoint paths.
+        """
+        # Try multiple possible endpoint paths
+        possible_urls = [
+            f"{self.base_url}/api/{self.session}/get-membership-approval-requests/{group_id}",
+            f"{self.base_url}/api/{self.session}/membership-approval-requests/{group_id}",
+        ]
+        
         async with httpx.AsyncClient(timeout=30) as client:
-            try:
-                resp = await client.get(url, headers=self.headers)
-                logger.info(f"GET_MEMBERSHIP_REQUESTS response: {resp.status_code} - {resp.text[:300]}")
-                if resp.status_code == 200:
-                    data = resp.json()
-                    if isinstance(data, dict):
-                        return data.get('response', data.get('data', []))
-                    return data if isinstance(data, list) else []
-                return []
-            except Exception as e:
-                logger.error(f"Error getting membership requests: {e}")
-                return []
+            for url in possible_urls:
+                try:
+                    logger.info(f"GET_MEMBERSHIP_REQUESTS: trying {url}")
+                    resp = await client.get(url, headers=self.headers)
+                    logger.info(f"GET_MEMBERSHIP_REQUESTS response: {resp.status_code} - {resp.text[:300]}")
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        if isinstance(data, dict):
+                            result = data.get('response', data.get('data', []))
+                            if isinstance(result, list):
+                                logger.info(f"GET_MEMBERSHIP_REQUESTS: found {len(result)} requests for {group_id[:20]}")
+                                return result
+                        elif isinstance(data, list):
+                            return data
+                    elif resp.status_code == 404:
+                        logger.warning(f"GET_MEMBERSHIP_REQUESTS: endpoint not found: {url}")
+                        continue
+                    else:
+                        logger.warning(f"GET_MEMBERSHIP_REQUESTS: status {resp.status_code} for {url}")
+                        continue
+                except Exception as e:
+                    logger.error(f"GET_MEMBERSHIP_REQUESTS error for {url}: {e}")
+                    continue
+        
+        logger.warning(f"GET_MEMBERSHIP_REQUESTS: no working endpoint found for {group_id[:20]}")
+        return []
 
     async def check_session_status(self) -> dict:
         """Check if the WPP session is connected. Returns dict with 'connected' bool and 'status' string."""
