@@ -1860,6 +1860,44 @@ async def api_exclusivity_report(username: str = Depends(get_current_username)):
     report["running"] = _exclusivity_running
     return report
 
+@app.get("/api/admin/pending-requests")
+async def api_pending_requests(username: str = Depends(get_current_username)):
+    """Return pending membership requests for all managed groups."""
+    db = SessionLocal()
+    try:
+        managed = db.query(WhatsAppGroup).all()
+        groups_data = []
+        for g in managed:
+            try:
+                requests = await wpp.get_membership_requests(g.group_jid)
+                pending = []
+                if isinstance(requests, list):
+                    for req in requests:
+                        if isinstance(req, dict):
+                            req_id = req.get('id', '')
+                            phone = str(req_id).replace('@c.us','').replace('@s.whatsapp.net','').replace('@lid','').split('@')[0]
+                        else:
+                            phone = str(req).split('@')[0]
+                        if phone:
+                            pending.append({"phone": phone})
+                groups_data.append({
+                    "name": g.name or g.group_jid[:20],
+                    "group_jid": g.group_jid,
+                    "count": len(pending),
+                    "pending": pending
+                })
+            except Exception as e:
+                groups_data.append({
+                    "name": g.name or g.group_jid[:20],
+                    "group_jid": g.group_jid,
+                    "count": 0,
+                    "error": str(e),
+                    "pending": []
+                })
+        return {"groups": groups_data}
+    finally:
+        db.close()
+
 @app.post("/api/admin/trigger-exclusive-cleanup")
 async def api_trigger_exclusive_cleanup(username: str = Depends(get_current_username)):
     """Manually trigger the exclusive cleanup job (runs in background)."""
