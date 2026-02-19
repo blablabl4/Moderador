@@ -1168,66 +1168,7 @@ async def api_session_logout(username: str = Depends(get_current_username)):
         return {"status": "error", "message": str(e)}
 
 # --- GROUPS & SCAN ENDPOINTS ---
-@app.get("/api/debug/raw-groups")
-async def api_debug_raw_groups(username: str = Depends(get_current_username)):
-    """Debug: return raw API response from WPPConnect for groups."""
-    await ensure_token()
-    results = {}
-    async with httpx.AsyncClient(timeout=30) as client:
-        # Try all-groups
-        try:
-            resp = await client.get(f"{wpp.base_url}/api/{wpp.session}/all-groups", headers=wpp.headers)
-            raw = resp.json()
-            results["all_groups_status"] = resp.status_code
-            # Get first group sample (truncated for readability)
-            if isinstance(raw, dict) and raw.get("response"):
-                groups_data = raw["response"]
-            elif isinstance(raw, list):
-                groups_data = raw
-            else:
-                groups_data = [raw]
-            
-            if groups_data and len(groups_data) > 0:
-                # Return first group with ALL fields to inspect structure
-                first = groups_data[0]
-                results["first_group_keys"] = list(first.keys()) if isinstance(first, dict) else str(type(first))
-                results["first_group_sample"] = first
-                results["total_groups"] = len(groups_data)
-                
-                # If there's a group ID, try to get its members
-                gid = first.get('id', {}).get('_serialized') if isinstance(first.get('id'), dict) else first.get('id', '')
-                if gid:
-                    results["sample_group_id"] = gid
-                    # Try group-members endpoint
-                    try:
-                        r2 = await client.get(f"{wpp.base_url}/api/{wpp.session}/group-members/{gid}", headers=wpp.headers)
-                        results["group_members_status"] = r2.status_code
-                        r2_data = r2.json()
-                        results["group_members_keys"] = list(r2_data.keys()) if isinstance(r2_data, dict) else str(type(r2_data))
-                        if isinstance(r2_data, dict) and r2_data.get("response"):
-                            members = r2_data["response"]
-                            results["members_count"] = len(members) if isinstance(members, list) else "not_list"
-                            if isinstance(members, list) and len(members) > 0:
-                                results["first_member_keys"] = list(members[0].keys()) if isinstance(members[0], dict) else str(type(members[0]))
-                                results["first_member_sample"] = members[0]
-                        else:
-                            results["group_members_raw"] = str(r2_data)[:500]
-                    except Exception as e:
-                        results["group_members_error"] = str(e)
-                    
-                    # Also try group-participants 
-                    try:
-                        r3 = await client.get(f"{wpp.base_url}/api/{wpp.session}/group-participants/{gid}", headers=wpp.headers)
-                        results["group_participants_status"] = r3.status_code
-                        results["group_participants_raw"] = str(r3.json())[:500]
-                    except Exception as e:
-                        results["group_participants_error"] = str(e)
-            else:
-                results["groups_data"] = str(groups_data)[:500]
-        except Exception as e:
-            results["error"] = str(e)
-    
-    return results
+
 
 def parse_group(g):
     """Extract group info from WPPConnect nested structure."""
@@ -1328,6 +1269,7 @@ async def api_scan(username: str = Depends(get_current_username)):
         {"item": "Agendador (Scheduler)", "status": "ok" if s.get("schedule_enabled") else "warning", "detail": f"Abrir {s.get('schedule_open_hour', 10)}h / Fechar {s.get('schedule_close_hour', 20)}h" if s.get("schedule_enabled") else "Desativado"},
         {"item": "Anti-flood", "status": "ok" if s.get("moderation_enabled") else "warning", "detail": f"{s.get('flood_max_messages', 2)} msgs + {s.get('flood_max_photos', 3)} fotos/dia" if s.get("moderation_enabled") else "Desativado"},
         {"item": "Filtro de links", "status": "ok" if s.get("link_filter_enabled") else "warning", "detail": f"Whitelist: {', '.join(s.get('whitelist_domains', []))}" if s.get("link_filter_enabled") else "Desativado"},
+        {"item": "Filtro de Figurinhas", "status": "ok" if s.get("sticker_filter_enabled", True) else "warning", "detail": "Ativo" if s.get("sticker_filter_enabled", True) else "Desativado"},
         {"item": "Super Admins", "status": "ok", "detail": f"{len(s.get('super_admins', []))} configurados"},
         {"item": f"Total de grupos", "status": "ok" if total_groups > 0 else "error", "detail": f"{total_groups} grupos encontrados"},
         {"item": f"Bot é admin em", "status": "ok" if groups_as_admin > 0 else "warning", "detail": f"{groups_as_admin} de {total_groups} grupos"},
@@ -1337,31 +1279,7 @@ async def api_scan(username: str = Depends(get_current_username)):
     return {"checklist": checklist, "system_checks": system_checks, "summary": summary}
 
 # --- SESSION MANAGEMENT ENDPOINTS ---
-@app.post("/api/session/{action}")
-async def api_session_action(action: str, username: str = Depends(get_current_username)):
-    """Manage WPP session: start, close, logout."""
-    await ensure_token()
-    if action == "start":
-        await wpp.start_session()
-        return {"message": "Sessão iniciada! Aguarde o QR code."}
-    elif action == "close":
-        await wpp.close_session()
-        return {"message": "Sessão fechada."}
-    elif action == "logout":
-        # Step 1: Close browser
-        await wpp.close_session()
-        await asyncio.sleep(1)
-        # Step 2: Logout (clear auth)
-        await wpp.logout_session()
-        await asyncio.sleep(1)
-        # Step 3: Delete session data (clear browser profile)
-        await wpp.delete_session()
-        await asyncio.sleep(2)
-        # Step 4: Start fresh session (should show QR code)
-        await wpp.start_session()
-        return {"message": "Sessão limpa! Clique 'Atualizar QR Code' em 5 segundos."}
-    else:
-        return JSONResponse({"message": f"Ação desconhecida: {action}"}, status_code=400)
+
 
 # --- SETTINGS ENDPOINTS ---
 @app.get("/api/settings")
@@ -1380,21 +1298,7 @@ async def api_settings_update(request: Request, username: str = Depends(get_curr
         logger.error(f"Error updating settings: {e}")
         return {"status": "error", "message": str(e)}
 
-@app.get("/api/groups/list")
-async def api_groups_list(username: str = Depends(get_current_username)):
-    """List all groups with id and name for configuration."""
-    try:
-        groups = await wpp.get_all_groups()
-        result = []
-        for g in groups:
-            gid = g.get('id', {}).get('_serialized') if isinstance(g.get('id'), dict) else g.get('id')
-            name = g.get('name', g.get('subject', 'Sem nome'))
-            if gid:
-                result.append({"id": gid, "name": name})
-        return {"groups": result}
-    except Exception as e:
-        logger.error(f"Error listing groups: {e}")
-        return {"groups": [], "error": str(e)}
+
 
 @app.post("/api/groups/{action}")
 async def api_groups_control(action: str, username: str = Depends(get_current_username)):
@@ -2007,6 +1911,66 @@ async def api_group_members_list(username: str = Depends(get_current_username)):
     finally:
         db.close()
 
+@app.get("/api/admin/unique-members")
+async def api_unique_members(username: str = Depends(get_current_username)):
+    """Get unique member phone numbers across all managed groups (excluding admins). Used by roulette."""
+    await ensure_token()
+    db = SessionLocal()
+    try:
+        managed = db.query(WhatsAppGroup).all()
+        if not managed:
+            return {"members": [], "total": 0, "groups_scanned": 0}
+
+        # Collect admin phones to exclude
+        admin_phones = set(get_super_admins())
+        for g in managed:
+            try:
+                admins_raw = await wpp.get_group_admins(g.group_jid)
+                if isinstance(admins_raw, list) and len(admins_raw) > 0 and isinstance(admins_raw[0], list):
+                    admins_raw = admins_raw[0]
+                if isinstance(admins_raw, list):
+                    for a in admins_raw:
+                        if isinstance(a, dict):
+                            for key in ['id', 'user', '_serialized']:
+                                v = a.get(key, '')
+                                if v:
+                                    admin_phones.add(str(v).split('@')[0])
+                        elif isinstance(a, str):
+                            admin_phones.add(a.split('@')[0])
+            except Exception:
+                pass
+
+        # Collect all unique phones across groups
+        all_phones = set()
+        groups_scanned = 0
+        for g in managed:
+            try:
+                members_raw = await wpp.get_group_participants(g.group_jid)
+                if isinstance(members_raw, list):
+                    groups_scanned += 1
+                    for m in members_raw:
+                        if isinstance(m, dict):
+                            mid = m.get('id', '')
+                            if isinstance(mid, dict):
+                                mid = mid.get('_serialized', mid.get('user', ''))
+                            phone = str(mid).split('@')[0]
+                        else:
+                            phone = str(m).split('@')[0]
+                        if phone and len(phone) >= 8:
+                            all_phones.add(phone)
+            except Exception as e:
+                logger.error(f"UNIQUE_MEMBERS: error fetching {g.name}: {e}")
+
+        # Remove admins
+        unique = sorted(all_phones - admin_phones)
+        logger.info(f"UNIQUE_MEMBERS: {len(unique)} unique non-admin members from {groups_scanned} groups")
+        return {"members": unique, "total": len(unique), "groups_scanned": groups_scanned, "admins_excluded": len(admin_phones)}
+    except Exception as e:
+        logger.error(f"UNIQUE_MEMBERS error: {e}")
+        return {"members": [], "total": 0, "error": str(e)}
+    finally:
+        db.close()
+
 @app.get("/api/admin/pending-requests")
 async def api_pending_requests(username: str = Depends(get_current_username)):
     """List pending membership requests for all managed groups."""
@@ -2035,20 +1999,7 @@ async def api_pending_requests(username: str = Depends(get_current_username)):
     finally:
         db.close()
 
-@app.get("/api/admin/debug-participants/{group_jid:path}")
-async def api_debug_participants(group_jid: str, username: str = Depends(get_current_username)):
-    """Debug: show raw participant data for a group."""
-    try:
-        members = await wpp.get_group_participants(group_jid)
-        sample = members[:3] if isinstance(members, list) else members
-        return {
-            "group_jid": group_jid,
-            "type": str(type(members)),
-            "count": len(members) if isinstance(members, list) else 0,
-            "sample_3": sample
-        }
-    except Exception as e:
-        return {"error": str(e)}
+
 
 @app.get("/api/groups/managed")
 async def api_managed_groups_list(username: str = Depends(get_current_username)):
@@ -2910,7 +2861,7 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
         return {"status": "group_not_monitored"}
     
     # 5. STICKER FILTER — Delete ALL stickers automatically
-    if msg_type == 'sticker':
+    if msg_type == 'sticker' and cfg.get("sticker_filter_enabled", True):
         logger.info(f"STICKER_BLOCKED: {sender_id[:20]} in {group_id[:20]}")
         warn_msg = "🚨 Figurinhas não são permitidas neste grupo! 🚨"
         enforce_result = await enforce_action("delete_warn", group_id, msg_id, warn_msg, sender_id=sender_id)

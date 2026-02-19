@@ -24,6 +24,7 @@ DEFAULTS = {
     "flood_window_hours": 2,         # Hours before flood counters reset per user
     "warn_message": "⚠️ Você excedeu o limite de mensagens neste grupo. Aguarde antes de enviar novamente.",
     "link_filter_enabled": True,
+    "sticker_filter_enabled": True,  # Block stickers from non-admins
     "whitelist_domains": ["idsr.com.br", "tvzapao.com.br"],
     "link_action": "delete",        # "delete", "delete_warn"
     "link_warn_message": "⚠️ Links externos não são permitidos neste grupo.",

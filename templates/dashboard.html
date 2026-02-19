@@ -645,6 +645,204 @@
         .save-feedback.show {
             opacity: 1;
         }
+
+        /* === ROULETTE 3D === */
+        .roulette-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 24px;
+        }
+
+        .roulette-stats {
+            display: flex;
+            gap: 16px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .roulette-stat {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 10px;
+            padding: 12px 20px;
+            text-align: center;
+        }
+
+        .roulette-stat-value {
+            font-size: 28px;
+            font-weight: 700;
+            color: #e94560;
+        }
+
+        .roulette-stat-label {
+            font-size: 11px;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-top: 4px;
+        }
+
+        .roulette-viewport {
+            width: 340px;
+            height: 340px;
+            perspective: 900px;
+            position: relative;
+            margin: 10px auto;
+            overflow: hidden;
+            border-radius: 50%;
+            background: radial-gradient(circle, #1a1a2e 0%, #0f0f1a 100%);
+            border: 3px solid #2a2a4a;
+            box-shadow: 0 0 40px rgba(233, 69, 96, 0.15), inset 0 0 60px rgba(0, 0, 0, 0.5);
+        }
+
+        /* Pointer arrow */
+        .roulette-pointer {
+            position: absolute;
+            top: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 0;
+            height: 0;
+            border-left: 16px solid transparent;
+            border-right: 16px solid transparent;
+            border-top: 30px solid #e94560;
+            z-index: 10;
+            filter: drop-shadow(0 4px 8px rgba(233, 69, 96, 0.6));
+        }
+
+        .roulette-scene {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transform-style: preserve-3d;
+        }
+
+        .roulette-cylinder {
+            position: relative;
+            width: 280px;
+            height: 50px;
+            transform-style: preserve-3d;
+            transition: transform 6s cubic-bezier(0.17, 0.67, 0.12, 0.99);
+        }
+
+        .roulette-cylinder.no-transition {
+            transition: none !important;
+        }
+
+        .roulette-face {
+            position: absolute;
+            width: 280px;
+            height: 46px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: 'Inter', monospace;
+            font-size: 16px;
+            font-weight: 700;
+            color: #fff;
+            background: linear-gradient(135deg, rgba(26, 26, 46, 0.95), rgba(22, 33, 62, 0.95));
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            backface-visibility: hidden;
+            text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+            letter-spacing: 1px;
+        }
+
+        .roulette-face.winner {
+            background: linear-gradient(135deg, #e94560, #c0392b) !important;
+            border-color: #e94560 !important;
+            box-shadow: 0 0 20px rgba(233, 69, 96, 0.5);
+            transform-origin: center;
+            animation: pulseWinner 0.5s ease-in-out 3;
+        }
+
+        @keyframes pulseWinner {
+
+            0%,
+            100% {
+                transform: inherit;
+            }
+
+            50% {
+                filter: brightness(1.3);
+            }
+        }
+
+        .btn-spin {
+            background: linear-gradient(135deg, #e94560, #c0392b);
+            color: #fff;
+            border: none;
+            border-radius: 14px;
+            padding: 16px 48px;
+            font-family: 'Inter', sans-serif;
+            font-size: 18px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            box-shadow: 0 4px 20px rgba(233, 69, 96, 0.4);
+        }
+
+        .btn-spin:hover:not(:disabled) {
+            transform: translateY(-2px) scale(1.02);
+            box-shadow: 0 6px 30px rgba(233, 69, 96, 0.5);
+        }
+
+        .btn-spin:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .winner-display {
+            display: none;
+            text-align: center;
+            padding: 24px;
+            background: linear-gradient(135deg, rgba(233, 69, 96, 0.1), rgba(192, 57, 43, 0.1));
+            border: 2px solid rgba(233, 69, 96, 0.3);
+            border-radius: 16px;
+            animation: fadeInWinner 0.5s ease;
+        }
+
+        .winner-display.show {
+            display: block;
+        }
+
+        @keyframes fadeInWinner {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .winner-label {
+            font-size: 14px;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            margin-bottom: 8px;
+        }
+
+        .winner-phone {
+            font-size: 32px;
+            font-weight: 700;
+            color: #e94560;
+            letter-spacing: 2px;
+            text-shadow: 0 0 20px rgba(233, 69, 96, 0.4);
+        }
+
+        .winner-confetti {
+            font-size: 40px;
+            margin: 8px 0;
+        }
     </style>
 </head>
 
@@ -660,6 +858,7 @@
             <button class="tab-btn" onclick="switchTab('grupos')">👥 Grupos</button>
             <button class="tab-btn" onclick="switchTab('varredura')">🔍 Varredura</button>
             <button class="tab-btn" onclick="switchTab('afiliados')">🔀 Redirecionador</button>
+            <button class="tab-btn" onclick="switchTab('roleta')">🎰 Roleta</button>
             <button class="tab-btn" onclick="switchTab('config')">⚙️ Configurações</button>
         </div>
 
@@ -1031,6 +1230,60 @@
                 </div>
             </div>
 
+        </div>
+    </div>
+
+    <!-- TAB: ROLETA -->
+    <div id="tab-roleta" class="tab-content">
+        <div class="card">
+            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
+                🎰 Roleta de Membros
+                <button onclick="loadRouletteMembers()" class="btn btn-outline"
+                    style="width:auto;margin:0;padding:6px 16px;font-size:12px;">🔄 Carregar Membros</button>
+            </div>
+            <div class="card-body">
+                <div class="roulette-container">
+                    <!-- Stats -->
+                    <div class="roulette-stats">
+                        <div class="roulette-stat">
+                            <div class="roulette-stat-value" id="roleta-total">-</div>
+                            <div class="roulette-stat-label">Membros Únicos</div>
+                        </div>
+                        <div class="roulette-stat">
+                            <div class="roulette-stat-value" id="roleta-groups">-</div>
+                            <div class="roulette-stat-label">Grupos</div>
+                        </div>
+                        <div class="roulette-stat">
+                            <div class="roulette-stat-value" id="roleta-admins">-</div>
+                            <div class="roulette-stat-label">Admins Excluídos</div>
+                        </div>
+                    </div>
+
+                    <!-- 3D Roulette -->
+                    <div class="roulette-viewport" id="roulette-viewport" style="display:none;">
+                        <div class="roulette-pointer"></div>
+                        <div class="roulette-scene">
+                            <div class="roulette-cylinder" id="roulette-cylinder"></div>
+                        </div>
+                    </div>
+
+                    <div id="roleta-placeholder" style="text-align:center;color:#666;padding:40px 20px;">
+                        <div style="font-size:48px;margin-bottom:12px;">🎰</div>
+                        <p>Clique em <strong>"Carregar Membros"</strong> para buscar os números de telefone.</p>
+                    </div>
+
+                    <!-- Spin Button -->
+                    <button class="btn-spin" id="btn-spin" onclick="spinRoulette()" disabled>🎰 GIRAR!</button>
+
+                    <!-- Winner Display -->
+                    <div class="winner-display" id="winner-display">
+                        <div class="winner-confetti">🎉🏆🎉</div>
+                        <div class="winner-label">Número Sorteado</div>
+                        <div class="winner-phone" id="winner-phone">-</div>
+                        <div class="winner-confetti">🥳✨🎊</div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -1751,6 +2004,136 @@
             } catch (e) { alert('Erro: ' + e); }
         }
 
+        // === ROULETTE ===
+        let _rouletteMembers = [];
+        let _rouletteSpinning = false;
+        let _currentRotation = 0;
+
+        async function loadRouletteMembers() {
+            document.getElementById('roleta-placeholder').innerHTML = '<div style="color:#f5a623;font-size:14px;">⏳ Buscando membros de todos os grupos...</div>';
+            document.getElementById('btn-spin').disabled = true;
+            try {
+                const res = await fetch('/api/admin/unique-members');
+                const data = await res.json();
+                _rouletteMembers = data.members || [];
+                document.getElementById('roleta-total').textContent = data.total || 0;
+                document.getElementById('roleta-groups').textContent = data.groups_scanned || 0;
+                document.getElementById('roleta-admins').textContent = data.admins_excluded || 0;
+
+                if (_rouletteMembers.length === 0) {
+                    document.getElementById('roleta-placeholder').innerHTML = '<div style="color:#e94560;">Nenhum membro encontrado.</div>';
+                    return;
+                }
+
+                buildRouletteCylinder();
+                document.getElementById('roleta-placeholder').style.display = 'none';
+                document.getElementById('roulette-viewport').style.display = 'block';
+                document.getElementById('btn-spin').disabled = false;
+                document.getElementById('winner-display').classList.remove('show');
+                log('🎰 Roleta: ' + _rouletteMembers.length + ' membros carregados');
+            } catch (e) {
+                document.getElementById('roleta-placeholder').innerHTML = '<div style="color:#e94560;">Erro: ' + e + '</div>';
+            }
+        }
+
+        function buildRouletteCylinder() {
+            const cylinder = document.getElementById('roulette-cylinder');
+            // Show a subset on the cylinder for visual appeal (max 24 faces)
+            const maxFaces = Math.min(_rouletteMembers.length, 24);
+            const angleStep = 360 / maxFaces;
+            // Radius based on faces — larger means more spacing
+            const radius = Math.max(120, (maxFaces * 46) / (2 * Math.PI));
+
+            cylinder.innerHTML = '';
+            cylinder.style.transform = 'rotateX(0deg)';
+            _currentRotation = 0;
+
+            // Pick evenly-spaced members for display
+            const step = Math.max(1, Math.floor(_rouletteMembers.length / maxFaces));
+            const displayMembers = [];
+            for (let i = 0; i < maxFaces; i++) {
+                displayMembers.push(_rouletteMembers[(i * step) % _rouletteMembers.length]);
+            }
+
+            for (let i = 0; i < maxFaces; i++) {
+                const face = document.createElement('div');
+                face.className = 'roulette-face';
+                face.textContent = formatPhone(displayMembers[i]);
+                face.dataset.index = i;
+                const angle = i * angleStep;
+                face.style.transform = `rotateX(${angle}deg) translateZ(${radius}px)`;
+                cylinder.appendChild(face);
+            }
+
+            // Store radius for spin calculation
+            cylinder.dataset.radius = radius;
+            cylinder.dataset.faces = maxFaces;
+            cylinder.dataset.angleStep = angleStep;
+        }
+
+        function formatPhone(phone) {
+            if (!phone || phone.length < 10) return phone;
+            // Format as +55 (11) 98342-6767
+            const cc = phone.substring(0, 2);
+            const area = phone.substring(2, 4);
+            const rest = phone.substring(4);
+            if (rest.length >= 8) {
+                return `+${cc} (${area}) ${rest.substring(0, rest.length - 4)}-${rest.substring(rest.length - 4)}`;
+            }
+            return phone;
+        }
+
+        function spinRoulette() {
+            if (_rouletteSpinning || _rouletteMembers.length === 0) return;
+            _rouletteSpinning = true;
+            document.getElementById('btn-spin').disabled = true;
+            document.getElementById('winner-display').classList.remove('show');
+
+            // Remove previous winner highlight
+            document.querySelectorAll('.roulette-face.winner').forEach(f => f.classList.remove('winner'));
+
+            // Pick a TRULY random winner from ALL members
+            const winnerIndex = Math.floor(Math.random() * _rouletteMembers.length);
+            const winnerPhone = _rouletteMembers[winnerIndex];
+
+            // Calculate spin: multiple full rotations + land on a random face position
+            const cylinder = document.getElementById('roulette-cylinder');
+            const maxFaces = parseInt(cylinder.dataset.faces);
+            const angleStep = parseFloat(cylinder.dataset.angleStep);
+
+            // Random face to land on visually
+            const landFace = Math.floor(Math.random() * maxFaces);
+            const targetAngle = -(landFace * angleStep);
+            const fullSpins = (5 + Math.floor(Math.random() * 4)) * 360; // 5-8 full rotations
+            const finalRotation = _currentRotation - fullSpins + targetAngle - (_currentRotation % 360);
+
+            // Update the landing face text to show the actual winner
+            const faces = cylinder.querySelectorAll('.roulette-face');
+            if (faces[landFace]) {
+                faces[landFace].textContent = formatPhone(winnerPhone);
+            }
+
+            cylinder.style.transition = 'transform 6s cubic-bezier(0.17, 0.67, 0.12, 0.99)';
+            cylinder.style.transform = `rotateX(${finalRotation}deg)`;
+            _currentRotation = finalRotation;
+
+            // After animation ends
+            setTimeout(() => {
+                _rouletteSpinning = false;
+                document.getElementById('btn-spin').disabled = false;
+
+                // Highlight winner face
+                if (faces[landFace]) {
+                    faces[landFace].classList.add('winner');
+                }
+
+                // Show winner
+                document.getElementById('winner-phone').textContent = formatPhone(winnerPhone);
+                document.getElementById('winner-display').classList.add('show');
+                log('🏆 Sorteado: ' + winnerPhone);
+            }, 6200);
+        }
+
         // Override switchTab to load affiliate data when switching
         const _origSwitchTab = switchTab;
         switchTab = function (tab) {
@@ -1759,6 +2142,12 @@
                 loadRedirectorData();
                 loadManagedGroups();
                 setTimeout(loadBotGroups, 300);
+            }
+            if (tab === 'roleta') {
+                // Auto-load if not loaded yet
+                if (_rouletteMembers.length === 0) {
+                    loadRouletteMembers();
+                }
             }
         };
 
