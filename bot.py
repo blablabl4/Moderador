@@ -783,21 +783,38 @@ async def job_exclusive_cleanup(force=False):
                 return ''
 
             # --- Part 1: Remove duplicate members ---
-            # First, fetch admins from ALL groups using the DEDICATED endpoint
-            admin_phones = set()
+            # ALWAYS start with hardcoded SUPER_ADMINS as safety net
+            admin_phones = set(get_super_admins())
+            logger.info(f"EXCLUSIVE_JOB: hardcoded super_admins: {list(admin_phones)}")
+
+            # Also fetch admins from ALL groups using the DEDICATED endpoint
             for g in managed:
                 try:
                     admins_raw = await wpp.get_group_admins(g.group_jid)
+                    logger.info(f"EXCLUSIVE_JOB: group-admins raw response for {g.name}: {str(admins_raw)[:500]}")
                     if isinstance(admins_raw, list):
                         for a in admins_raw:
                             admin_phone = extract_phone(a)
                             if admin_phone and len(admin_phone) >= 8:
                                 admin_phones.add(admin_phone)
                         logger.info(f"EXCLUSIVE_JOB: {g.name} has {len(admins_raw)} admin(s)")
+                    elif isinstance(admins_raw, dict):
+                        # Maybe response is wrapped in a dict
+                        items = admins_raw.get('response', admins_raw.get('participants', []))
+                        if isinstance(items, list):
+                            for a in items:
+                                admin_phone = extract_phone(a)
+                                if admin_phone and len(admin_phone) >= 8:
+                                    admin_phones.add(admin_phone)
+                            logger.info(f"EXCLUSIVE_JOB: {g.name} has {len(items)} admin(s) (from dict)")
                 except Exception as e:
                     logger.error(f"EXCLUSIVE_JOB: error fetching admins for {g.name}: {e}")
 
-            logger.info(f"EXCLUSIVE_JOB: total admin phones to EXCLUDE: {len(admin_phones)} -> {list(admin_phones)[:10]}")
+            logger.info(f"EXCLUSIVE_JOB: total admin phones to EXCLUDE: {len(admin_phones)} -> {list(admin_phones)}")
+            # SAFETY CHECK: if no admins found beyond hardcoded, something is wrong — abort
+            if len(admin_phones) <= len(get_super_admins()):
+                logger.warning(f"EXCLUSIVE_JOB: ABORTING — could not detect ANY group admins beyond hardcoded list. API may be broken.")
+                return
 
             # Build phone -> list of (group_jid, group_name, raw_id)
             phone_groups = {}
@@ -949,7 +966,8 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(job_close_groups, 'cron', hour=20, minute=0)
     scheduler.add_job(job_watchdog, 'interval', minutes=5, id='watchdog')
     scheduler.add_job(job_sync_invite_links, 'interval', minutes=10, id='sync_invite_links')
-    scheduler.add_job(job_exclusive_cleanup, 'interval', minutes=10, id='exclusive_cleanup')
+    # DISABLED: exclusive_cleanup was removing admins. Re-enable after confirming fix.
+    # scheduler.add_job(job_exclusive_cleanup, 'interval', minutes=10, id='exclusive_cleanup')
     scheduler.start()
     logger.info("Scheduler started: watchdog(5m), invite_sync(10m), exclusive_cleanup(10m)")
     
