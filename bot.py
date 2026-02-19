@@ -723,7 +723,6 @@ async def job_sync_invite_links():
 _exclusivity_report = {
     "date": datetime.now().strftime("%Y-%m-%d"),
     "removed_members": [],   # {"phone", "removed_from", "kept_in", "time"}
-    "rejected_requests": [],  # {"phone", "group", "time"}
     "last_run": None
 }
 _exclusivity_running = False
@@ -735,7 +734,7 @@ async def job_exclusive_cleanup(force=False):
         # Reset report if new day
         today = datetime.now().strftime("%Y-%m-%d")
         if _exclusivity_report["date"] != today:
-            _exclusivity_report = {"date": today, "removed_members": [], "rejected_requests": [], "last_run": None}
+            _exclusivity_report = {"date": today, "removed_members": [], "last_run": None}
 
 
 
@@ -869,32 +868,6 @@ async def job_exclusive_cleanup(force=False):
                         failed_count += 1
                         logger.error(f"EXCLUSIVE_JOB: remove error {phone} from {group_name}: {e}")
 
-            # --- Part 2: Reject duplicate pending requests ---
-            rejected_count = 0
-            for g in managed:
-                try:
-                    requests = await wpp.get_membership_requests(g.group_jid)
-                    if not isinstance(requests, list):
-                        continue
-                    for req in requests:
-                        req_id = req.get('id', '') if isinstance(req, dict) else str(req)
-                        req_phone = str(req_id).replace('@c.us','').replace('@s.whatsapp.net','').replace('@lid','').split('@')[0]
-                        if not req_phone or len(req_phone) < 8:
-                            continue
-                        # Check if already in another group
-                        if req_phone in phone_groups:
-                            req_in_groups = [gj for gj, _, _ in phone_groups.get(req_phone, [])]
-                            if any(gj != g.group_jid for gj in req_in_groups):
-                                await asyncio.sleep(random.uniform(1.0, 3.0))
-                                await wpp.reject_participant(g.group_jid, req_id)
-                                rejected_count += 1
-                                _exclusivity_report["rejected_requests"].append({
-                                    "phone": req_phone, "group": g.name or g.group_jid[:20],
-                                    "time": datetime.now().strftime("%H:%M")
-                                })
-                                logger.info(f"EXCLUSIVE_JOB: rejected pending {req_phone} from {g.name}")
-                except Exception as e:
-                    logger.error(f"EXCLUSIVE_JOB: pending scan error for {g.name}: {e}")
 
             # --- Part 3: POST-RUN VALIDATION ---
             logger.info("EXCLUSIVE_JOB: starting post-run validation...")
@@ -922,7 +895,7 @@ async def job_exclusive_cleanup(force=False):
             logger.info(f"EXCLUSIVE_JOB: VALIDATION — before={len(duplicates)}, remaining={len(remaining_duplicates)}, effective={len(duplicates) - len(remaining_duplicates)}")
 
             _exclusivity_report["last_run"] = datetime.now().strftime("%H:%M:%S")
-            logger.info(f"EXCLUSIVE_JOB: done — {removed_count} removed, {failed_count} failed, {rejected_count} rejected, {len(duplicates)} duplicates found")
+            logger.info(f"EXCLUSIVE_JOB: done — {removed_count} removed, {failed_count} failed, {len(duplicates)} duplicates found")
         finally:
             db.close()
     except Exception as e:
@@ -1981,48 +1954,10 @@ async def api_exclusivity_report(username: str = Depends(get_current_username)):
     """Return today's exclusivity cleanup report."""
     today = datetime.now().strftime("%Y-%m-%d")
     if _exclusivity_report["date"] != today:
-        return {"date": today, "removed_members": [], "rejected_requests": [], "last_run": None, "running": _exclusivity_running}
+        return {"date": today, "removed_members": [], "last_run": None, "running": _exclusivity_running}
     report = dict(_exclusivity_report)
     report["running"] = _exclusivity_running
     return report
-
-@app.get("/api/admin/pending-requests")
-async def api_pending_requests(username: str = Depends(get_current_username)):
-    """Return pending membership requests for all managed groups."""
-    db = SessionLocal()
-    try:
-        managed = db.query(WhatsAppGroup).all()
-        groups_data = []
-        for g in managed:
-            try:
-                requests = await wpp.get_membership_requests(g.group_jid)
-                pending = []
-                if isinstance(requests, list):
-                    for req in requests:
-                        if isinstance(req, dict):
-                            req_id = req.get('id', '')
-                            phone = str(req_id).replace('@c.us','').replace('@s.whatsapp.net','').replace('@lid','').split('@')[0]
-                        else:
-                            phone = str(req).split('@')[0]
-                        if phone:
-                            pending.append({"phone": phone})
-                groups_data.append({
-                    "name": g.name or g.group_jid[:20],
-                    "group_jid": g.group_jid,
-                    "count": len(pending),
-                    "pending": pending
-                })
-            except Exception as e:
-                groups_data.append({
-                    "name": g.name or g.group_jid[:20],
-                    "group_jid": g.group_jid,
-                    "count": 0,
-                    "error": str(e),
-                    "pending": []
-                })
-        return {"groups": groups_data}
-    finally:
-        db.close()
 
 @app.post("/api/admin/trigger-exclusive-cleanup")
 async def api_trigger_exclusive_cleanup(username: str = Depends(get_current_username)):
