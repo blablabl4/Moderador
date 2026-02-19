@@ -1752,6 +1752,7 @@ async def api_group_duplicates(username: str = Depends(get_current_username)):
         
         # Fetch members for each managed group
         group_members = {}
+        admin_phones = set()  # Track admins to exclude from duplicates
         debug_info = []
         
         for g in managed:
@@ -1765,6 +1766,9 @@ async def api_group_duplicates(username: str = Depends(get_current_username)):
                         phone = extract_phone(m)
                         if phone and len(phone) > 3:  # Skip empty/invalid
                             ids.add(phone)
+                            # Track admins
+                            if isinstance(m, dict) and (m.get('isAdmin', False) or m.get('isSuperAdmin', False)):
+                                admin_phones.add(phone)
                     group_members[g.group_jid] = {
                         "name": g.name,
                         "ids": ids,
@@ -1791,7 +1795,8 @@ async def api_group_duplicates(username: str = Depends(get_current_username)):
                     member_groups[mid] = []
                 member_groups[mid].append(info["name"])
         
-        duplicates = {mid: groups for mid, groups in member_groups.items() if len(groups) > 1}
+        # Exclude admins — they are supposed to be in all groups
+        duplicates = {mid: groups for mid, groups in member_groups.items() if len(groups) > 1 and mid not in admin_phones}
         all_unique = set(member_groups.keys())
         
         groups_summary = [{"name": info["name"], "members": info["total"], "raw_count": info.get("raw_count", 0)} for jid, info in group_members.items()]
