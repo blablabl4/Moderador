@@ -1456,9 +1456,19 @@ def page_home(request: Request):
     """Main house invite link — distributor without affiliate."""
     db = SessionLocal()
     try:
-        group = db.query(WhatsAppGroup).filter(
-            WhatsAppGroup.is_active == True
-        ).order_by(WhatsAppGroup.current_members.asc()).first()
+        # Check if admin has set a specific redirect target
+        target_jid = cfg.get("redirect_target_jid", "")
+        group = None
+        if target_jid:
+            group = db.query(WhatsAppGroup).filter(
+                WhatsAppGroup.group_jid == target_jid,
+                WhatsAppGroup.is_active == True
+            ).first()
+        if not group:
+            # Fallback: pick group with fewest members
+            group = db.query(WhatsAppGroup).filter(
+                WhatsAppGroup.is_active == True
+            ).order_by(WhatsAppGroup.current_members.asc()).first()
 
         if not group:
             return templates.TemplateResponse("entrar.html", {
@@ -1510,9 +1520,19 @@ def page_redirect(request: Request):
     """Auto-redirect to group — no click needed, no affiliate."""
     db = SessionLocal()
     try:
-        group = db.query(WhatsAppGroup).filter(
-            WhatsAppGroup.is_active == True
-        ).order_by(WhatsAppGroup.current_members.asc()).first()
+        # Check if admin has set a specific redirect target
+        target_jid = cfg.get("redirect_target_jid", "")
+        group = None
+        if target_jid:
+            group = db.query(WhatsAppGroup).filter(
+                WhatsAppGroup.group_jid == target_jid,
+                WhatsAppGroup.is_active == True
+            ).first()
+        if not group:
+            # Fallback: pick group with fewest members
+            group = db.query(WhatsAppGroup).filter(
+                WhatsAppGroup.is_active == True
+            ).order_by(WhatsAppGroup.current_members.asc()).first()
 
         if not group:
             return templates.TemplateResponse("redirecionar.html", {
@@ -2132,9 +2152,18 @@ async def api_managed_groups_list(username: str = Depends(get_current_username))
             "current_members": g.current_members, "is_active": g.is_active,
             "display_order": g.display_order,
             "remaining": max(0, g.max_members - g.current_members)
-        } for g in groups]}
+        } for g in groups], "redirect_target_jid": cfg.get("redirect_target_jid", "")}
     finally:
         db.close()
+
+@app.post("/api/groups/managed/set-redirect-target")
+async def api_set_redirect_target(request: Request, username: str = Depends(get_current_username)):
+    """Set which group receives all new redirected members."""
+    body = await request.json()
+    jid = body.get("group_jid", "")
+    cfg.save_settings({"redirect_target_jid": jid})
+    logger.info(f"REDIRECT_TARGET: set to {jid}")
+    return {"status": "success", "redirect_target_jid": jid}
 
 @app.get("/api/affiliate/stats")
 async def api_affiliate_stats(username: str = Depends(get_current_username)):

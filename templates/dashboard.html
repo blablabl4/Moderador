@@ -1665,6 +1665,7 @@
         }
 
         let _managedJids = new Set();
+        let _redirectTargetJid = '';
 
         async function loadManagedGroups() {
             try {
@@ -1672,10 +1673,13 @@
                 const data = await res.json();
                 const list = document.getElementById('managed-groups-list');
                 _managedJids.clear();
+                _redirectTargetJid = data.redirect_target_jid || '';
                 if (data.groups && data.groups.length > 0) {
                     data.groups.forEach(g => _managedJids.add(g.group_jid));
-                    list.innerHTML = data.groups.map((g, i) => `
-                        <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;background:rgba(255,255,255,0.02);border-radius:10px;margin-bottom:6px;border:1px solid rgba(255,255,255,0.05);">
+                    list.innerHTML = data.groups.map((g, i) => {
+                        const isTarget = g.group_jid === _redirectTargetJid;
+                        return `
+                        <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;background:${isTarget ? 'rgba(37,211,102,0.08)' : 'rgba(255,255,255,0.02)'};border-radius:10px;margin-bottom:6px;border:1px solid ${isTarget ? 'rgba(37,211,102,0.3)' : 'rgba(255,255,255,0.05)'};">
                             <span style="width:24px;text-align:center;font-size:12px;color:#888;">${i + 1}</span>
                             <div style="flex:1;">
                                 <div style="font-size:14px;font-weight:600;">${g.name || 'Sem nome'}</div>
@@ -1686,13 +1690,30 @@
                                 <div style="font-size:10px;color:${g.remaining > 50 ? '#25D366' : g.remaining > 0 ? '#ffd200' : '#e94560'};">${g.remaining > 0 ? 'faltam ' + g.remaining : '🚫 LOTADO'}</div>
                                 <span class="badge ${g.is_active ? 'badge-green' : 'badge-red'}" style="font-size:10px;">${g.is_active ? 'Ativo' : 'Lotado'}</span>
                             </div>
+                            <button onclick="setRedirectTarget('${g.group_jid}')" style="background:${isTarget ? '#25D366' : 'rgba(255,255,255,0.05)'};border:1px solid ${isTarget ? '#25D366' : 'rgba(255,255,255,0.1)'};color:${isTarget ? '#000' : '#888'};cursor:pointer;font-size:12px;padding:4px 10px;border-radius:6px;font-weight:600;white-space:nowrap;" title="Redirecionar para este grupo">${isTarget ? '🎯 ATIVO' : '🎯'}</button>
                             <button onclick="removeManagedGroup(${g.id})" style="background:none;border:none;color:#e94560;cursor:pointer;font-size:16px;" title="Remover">✕</button>
-                        </div>
-                    `).join('');
+                        </div>`;
+                    }).join('');
                 } else {
                     list.innerHTML = '<div style="color:#666;padding:12px;text-align:center;">Nenhum grupo no sistema. Selecione abaixo e clique "Adicionar Selecionados".</div>';
                 }
             } catch (e) { console.error('Managed groups error:', e); }
+        }
+
+        async function setRedirectTarget(jid) {
+            try {
+                const newTarget = (jid === _redirectTargetJid) ? '' : jid; // Toggle off if already selected
+                const res = await fetch('/api/groups/managed/set-redirect-target', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ group_jid: newTarget })
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    log(newTarget ? '🎯 Redirecionamento configurado para: ' + newTarget.substring(0, 20) : '🔄 Redirecionamento automático restaurado');
+                    loadManagedGroups();
+                }
+            } catch (e) { console.error('Set redirect error:', e); }
         }
 
         async function loadBotGroups() {
