@@ -922,6 +922,28 @@ async def lifespan(app: FastAPI):
     
     init_db()
     
+    # Auto-fix group display_order based on group name number
+    db = SessionLocal()
+    try:
+        groups = db.query(WhatsAppGroup).all()
+        if groups:
+            def extract_group_number(name):
+                """Extract number from group name like 'DEZAPEGÃO DO ZAPÃO #3' -> 3"""
+                import re
+                match = re.search(r'#0*(\d+)', name or '')
+                return int(match.group(1)) if match else 999
+            
+            groups.sort(key=lambda g: extract_group_number(g.name))
+            for i, g in enumerate(groups):
+                if g.display_order != i:
+                    logger.info(f"AUTO_ORDER_FIX: {g.name} display_order {g.display_order} -> {i}")
+                    g.display_order = i
+            db.commit()
+    except Exception as e:
+        logger.error(f"Error fixing display_order: {e}")
+    finally:
+        db.close()
+    
     scheduler = AsyncIOScheduler()
     scheduler.add_job(job_open_groups, 'cron', hour=10, minute=0)
     scheduler.add_job(job_close_groups, 'cron', hour=20, minute=0)
