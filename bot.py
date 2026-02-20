@@ -1940,30 +1940,8 @@ async def api_admin_all_groups(username: str = Depends(get_current_username)):
     await ensure_token()
     try:
         raw = await wpp.get_all_groups()
-        groups = []
-        NAME_FIELDS = ["name", "subject", "formattedTitle", "localTitle", "pushname", "commonName", "title"]
-        for g in (raw or []):
-            if isinstance(g, dict):
-                gid = g.get("id", g.get("_serialized", ""))
-                if isinstance(gid, dict):
-                    gid = gid.get("_serialized", "")
-                gid = str(gid)
-                gname = None
-                for field in NAME_FIELDS:
-                    val = g.get(field)
-                    if val and isinstance(val, str) and val.strip():
-                        gname = val.strip()
-                        break
-                if not gname:
-                    gname = gid.split("@")[0] if "@" in gid else gid[:30]
-                    logger.warning(f"all-groups: no name for {gid}, keys={list(g.keys())}")
-            elif isinstance(g, str):
-                gid = g
-                gname = g.split("@")[0] if "@" in g else g[:30]
-            else:
-                continue
-            if gid:
-                groups.append({"id": gid, "name": gname})
+        # Reuse parse_group() which handles all WPPConnect nested name fields correctly
+        groups = [{"id": p["id"], "name": p["name"]} for p in (parse_group(g) for g in (raw or [])) if p["id"]]
         groups.sort(key=lambda x: x["name"])
         return {"groups": groups}
     except Exception as e:
