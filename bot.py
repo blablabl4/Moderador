@@ -746,160 +746,177 @@ async def job_exclusive_cleanup(force=False):
 
         await ensure_token()
 
-        db = SessionLocal()
-        try:
-            managed = db.query(WhatsAppGroup).order_by(WhatsAppGroup.display_order.asc()).all()
-            if len(managed) < 2:
-                logger.info(f"EXCLUSIVE_JOB: only {len(managed)} managed group(s), skipping.")
-                return
+        # Use ALL bot groups (not just managed ones in the redirector)
+        all_groups_raw = await wpp.get_all_groups()
+        if not all_groups_raw:
+            logger.info("EXCLUSIVE_JOB: no groups found, skipping.")
+            _exclusivity_report["last_run"] = datetime.now().strftime("%H:%M:%S")
+            return
 
-            def extract_phone(member):
-                """Extract identifier from any WPPConnect participant format."""
-                if isinstance(member, str):
-                    return member.split('@')[0]
-                if isinstance(member, dict):
-                    for field in ['id', '_serialized', 'user']:
-                        val = member.get(field, '')
-                        if val:
-                            if isinstance(val, dict):
-                                inner = val.get('_serialized', val.get('user', ''))
-                                if inner:
-                                    return str(inner).split('@')[0]
-                            else:
-                                return str(val).split('@')[0]
-                return None
+        # Parse into list of (jid, name) sorted by name for consistent ordering
+        managed = []
+        for g in all_groups_raw:
+            if isinstance(g, dict):
+                gid = g.get("id", g.get("_serialized", ""))
+                if isinstance(gid, dict):
+                    gid = gid.get("_serialized", "")
+                gname = g.get("name", g.get("subject", str(gid)[:20]))
+            elif isinstance(g, str):
+                gid, gname = g, g[:20]
+            else:
+                continue
+            if gid:
+                managed.append({"jid": str(gid), "name": str(gname)})
 
-            def extract_raw_id(member):
-                """Extract the full raw serialized ID for API calls."""
-                if isinstance(member, str):
-                    return member
-                if isinstance(member, dict):
-                    mid = member.get('id', '')
-                    if isinstance(mid, dict):
-                        return mid.get('_serialized', '')
-                    elif mid:
-                        return str(mid)
-                return ''
+        if len(managed) < 2:
+            logger.info(f"EXCLUSIVE_JOB: only {len(managed)} group(s), nothing to deduplicate.")
+            _exclusivity_report["last_run"] = datetime.now().strftime("%H:%M:%S")
+            return
 
-            # --- Part 1: Remove duplicate members ---
-            # ALWAYS start with hardcoded SUPER_ADMINS as safety net
-            admin_phones = set(get_super_admins())
-            logger.info(f"EXCLUSIVE_JOB: hardcoded super_admins: {list(admin_phones)}")
+        def extract_phone(member):
+            """Extract identifier from any WPPConnect participant format."""
+            if isinstance(member, str):
+                return member.split('@')[0]
+            if isinstance(member, dict):
+                for field in ['id', '_serialized', 'user']:
+                    val = member.get(field, '')
+                    if val:
+                        if isinstance(val, dict):
+                            inner = val.get('_serialized', val.get('user', ''))
+                            if inner:
+                                return str(inner).split('@')[0]
+                        else:
+                            return str(val).split('@')[0]
+            return None
 
-            # Also fetch admins from ALL groups using the DEDICATED endpoint
-            for g in managed:
-                try:
-                    admins_raw = await wpp.get_group_admins(g.group_jid)
-                    logger.info(f"EXCLUSIVE_JOB: group-admins raw response for {g.name}: {str(admins_raw)[:500]}")
-                    if isinstance(admins_raw, list):
-                        for a in admins_raw:
+        def extract_raw_id(member):
+            """Extract the full raw serialized ID for API calls."""
+            if isinstance(member, str):
+                return member
+            if isinstance(member, dict):
+                mid = member.get('id', '')
+                if isinstance(mid, dict):
+                    return mid.get('_serialized', '')
+                elif mid:
+                    return str(mid)
+            return ''
+
+        # --- Part 1: Remove duplicate members ---
+        # ALWAYS start with hardcoded SUPER_ADMINS as safety net
+        admin_phones = set(get_super_admins())
+        logger.info(f"EXCLUSIVE_JOB: hardcoded super_admins: {list(admin_phones)}")
+
+        for g in managed:
+            try:
+                admins_raw = await wpp.get_group_admins(g["jid"])
+                logger.info(f"EXCLUSIVE_JOB: group-admins raw response for {g['name']}: {str(admins_raw)[:300]}")
+                if isinstance(admins_raw, list):
+                    for a in admins_raw:
+                        admin_phone = extract_phone(a)
+                        if admin_phone and len(admin_phone) >= 8:
+                            admin_phones.add(admin_phone)
+                    logger.info(f"EXCLUSIVE_JOB: {g['name']} has {len(admins_raw)} admin(s)")
+                elif isinstance(admins_raw, dict):
+                    items = admins_raw.get('response', admins_raw.get('participants', []))
+                    if isinstance(items, list):
+                        for a in items:
                             admin_phone = extract_phone(a)
                             if admin_phone and len(admin_phone) >= 8:
                                 admin_phones.add(admin_phone)
-                        logger.info(f"EXCLUSIVE_JOB: {g.name} has {len(admins_raw)} admin(s)")
-                    elif isinstance(admins_raw, dict):
-                        # Maybe response is wrapped in a dict
-                        items = admins_raw.get('response', admins_raw.get('participants', []))
-                        if isinstance(items, list):
-                            for a in items:
-                                admin_phone = extract_phone(a)
-                                if admin_phone and len(admin_phone) >= 8:
-                                    admin_phones.add(admin_phone)
-                            logger.info(f"EXCLUSIVE_JOB: {g.name} has {len(items)} admin(s) (from dict)")
-                except Exception as e:
-                    logger.error(f"EXCLUSIVE_JOB: error fetching admins for {g.name}: {e}")
+                        logger.info(f"EXCLUSIVE_JOB: {g['name']} has {len(items)} admin(s) (from dict)")
+            except Exception as e:
+                logger.error(f"EXCLUSIVE_JOB: error fetching admins for {g['name']}: {e}")
 
-            logger.info(f"EXCLUSIVE_JOB: total admin phones to EXCLUDE: {len(admin_phones)} -> {list(admin_phones)}")
-            # SAFETY CHECK: if no admins found beyond hardcoded, something is wrong — abort
-            if len(admin_phones) <= len(get_super_admins()):
-                logger.warning(f"EXCLUSIVE_JOB: ABORTING — could not detect ANY group admins beyond hardcoded list. API may be broken.")
-                return
-
-            # Build phone -> list of (group_jid, group_name, raw_id)
-            phone_groups = {}
-            for g in managed:
-                try:
-                    members_raw = await wpp.get_group_participants(g.group_jid)
-                    count = len(members_raw) if isinstance(members_raw, list) else 0
-                    logger.info(f"EXCLUSIVE_JOB: group={g.name}, members={count}")
-                    if isinstance(members_raw, list) and count > 0:
-                        sample = str(members_raw[0])[:300]
-                        logger.info(f"EXCLUSIVE_JOB: sample member of {g.name}: {sample}")
-                        for m in members_raw:
-                            phone = extract_phone(m)
-                            raw_id = extract_raw_id(m)
-                            if phone and len(phone) >= 8:
-                                if phone not in phone_groups:
-                                    phone_groups[phone] = []
-                                phone_groups[phone].append((g.group_jid, g.name or g.group_jid[:20], raw_id))
-                except Exception as e:
-                    logger.error(f"EXCLUSIVE_JOB: error fetching {g.name}: {e}")
-
-            # Exclude admins from duplicate detection — they MUST stay in all groups
-            duplicates = {p: gs for p, gs in phone_groups.items() if len(gs) >= 2 and p not in admin_phones}
-            logger.info(f"EXCLUSIVE_JOB: total_phones={len(phone_groups)}, admins_excluded={len(admin_phones)}, duplicates={len(duplicates)}")
-
-            removed_count = 0
-            failed_count = 0
-            for phone, groups in duplicates.items():
-                keep = groups[0]
-                for group_jid, group_name, raw_id in groups[1:]:
-                    try:
-                        await asyncio.sleep(random.uniform(1.5, 3.0))
-                        # Pass raw_id — remove_participant will try multiple formats
-                        id_to_use = raw_id if raw_id else f"{phone}@c.us"
-                        logger.info(f"EXCLUSIVE_JOB: removing {id_to_use} from {group_name}")
-                        success = await wpp.remove_participant(group_jid, id_to_use)
-                        if success:
-                            removed_count += 1
-                            _exclusivity_report["removed_members"].append({
-                                "phone": phone, "removed_from": group_name,
-                                "kept_in": keep[1], "time": datetime.now().strftime("%H:%M")
-                            })
-                            logger.info(f"EXCLUSIVE_JOB: ✅ removed {phone} from {group_name}, kept in {keep[1]}")
-                        else:
-                            failed_count += 1
-                            _exclusivity_report["removed_members"].append({
-                                "phone": phone, "removed_from": f"❌ FALHOU: {group_name}",
-                                "kept_in": keep[1], "time": datetime.now().strftime("%H:%M")
-                            })
-                            logger.warning(f"EXCLUSIVE_JOB: ❌ FAILED to remove {phone} from {group_name}")
-                    except Exception as e:
-                        failed_count += 1
-                        logger.error(f"EXCLUSIVE_JOB: remove error {phone} from {group_name}: {e}")
-
-
-            # --- Part 3: POST-RUN VALIDATION ---
-            logger.info("EXCLUSIVE_JOB: starting post-run validation...")
-            validation_phone_groups = {}
-            for g in managed:
-                try:
-                    members_raw = await wpp.get_group_participants(g.group_jid)
-                    if isinstance(members_raw, list):
-                        for m in members_raw:
-                            phone = extract_phone(m)
-                            if phone and len(phone) >= 8:
-                                if phone not in validation_phone_groups:
-                                    validation_phone_groups[phone] = []
-                                validation_phone_groups[phone].append(g.name or g.group_jid[:20])
-                except Exception as e:
-                    logger.error(f"EXCLUSIVE_JOB: validation error for {g.name}: {e}")
-
-            remaining_duplicates = {p: gs for p, gs in validation_phone_groups.items() if len(gs) >= 2}
-            _exclusivity_report["validation"] = {
-                "remaining_duplicates": len(remaining_duplicates),
-                "total_unique": len(validation_phone_groups),
-                "effective_removals": len(duplicates) - len(remaining_duplicates),
-                "sample_remaining": [{"phone": p, "groups": gs} for p, gs in list(remaining_duplicates.items())[:10]]
-            }
-            logger.info(f"EXCLUSIVE_JOB: VALIDATION — before={len(duplicates)}, remaining={len(remaining_duplicates)}, effective={len(duplicates) - len(remaining_duplicates)}")
-
+        logger.info(f"EXCLUSIVE_JOB: total admin phones to EXCLUDE: {len(admin_phones)} -> {list(admin_phones)}")
+        # SAFETY CHECK: if no admins found beyond hardcoded, something is wrong — abort
+        if len(admin_phones) <= len(get_super_admins()):
+            logger.warning(f"EXCLUSIVE_JOB: ABORTING — could not detect ANY group admins beyond hardcoded list. API may be broken.")
             _exclusivity_report["last_run"] = datetime.now().strftime("%H:%M:%S")
-            logger.info(f"EXCLUSIVE_JOB: done — {removed_count} removed, {failed_count} failed, {len(duplicates)} duplicates found")
-        finally:
-            db.close()
+            return
+
+        # Build phone -> list of (group_jid, group_name, raw_id)
+        phone_groups = {}
+        for g in managed:
+            try:
+                members_raw = await wpp.get_group_participants(g["jid"])
+                count = len(members_raw) if isinstance(members_raw, list) else 0
+                logger.info(f"EXCLUSIVE_JOB: group={g['name']}, members={count}")
+                if isinstance(members_raw, list) and count > 0:
+                    sample = str(members_raw[0])[:300]
+                    logger.info(f"EXCLUSIVE_JOB: sample member of {g['name']}: {sample}")
+                    for m in members_raw:
+                        phone = extract_phone(m)
+                        raw_id = extract_raw_id(m)
+                        if phone and len(phone) >= 8:
+                            if phone not in phone_groups:
+                                phone_groups[phone] = []
+                            phone_groups[phone].append((g["jid"], g["name"], raw_id))
+            except Exception as e:
+                logger.error(f"EXCLUSIVE_JOB: error fetching {g['name']}: {e}")
+
+        # Exclude admins from duplicate detection — they MUST stay in all groups
+        duplicates = {p: gs for p, gs in phone_groups.items() if len(gs) >= 2 and p not in admin_phones}
+        logger.info(f"EXCLUSIVE_JOB: total_phones={len(phone_groups)}, admins_excluded={len(admin_phones)}, duplicates={len(duplicates)}")
+
+        removed_count = 0
+        failed_count = 0
+        for phone, groups in duplicates.items():
+            keep = groups[0]
+            for group_jid, group_name, raw_id in groups[1:]:
+                try:
+                    await asyncio.sleep(random.uniform(1.5, 3.0))
+                    id_to_use = raw_id if raw_id else f"{phone}@c.us"
+                    logger.info(f"EXCLUSIVE_JOB: removing {id_to_use} from {group_name}")
+                    success = await wpp.remove_participant(group_jid, id_to_use)
+                    if success:
+                        removed_count += 1
+                        _exclusivity_report["removed_members"].append({
+                            "phone": phone, "removed_from": group_name,
+                            "kept_in": keep[1], "time": datetime.now().strftime("%H:%M")
+                        })
+                        logger.info(f"EXCLUSIVE_JOB: ✅ removed {phone} from {group_name}, kept in {keep[1]}")
+                    else:
+                        failed_count += 1
+                        _exclusivity_report["removed_members"].append({
+                            "phone": phone, "removed_from": f"❌ FALHOU: {group_name}",
+                            "kept_in": keep[1], "time": datetime.now().strftime("%H:%M")
+                        })
+                        logger.warning(f"EXCLUSIVE_JOB: ❌ FAILED to remove {phone} from {group_name}")
+                except Exception as e:
+                    failed_count += 1
+                    logger.error(f"EXCLUSIVE_JOB: remove error {phone} from {group_name}: {e}")
+
+        # --- Part 3: POST-RUN VALIDATION ---
+        logger.info("EXCLUSIVE_JOB: starting post-run validation...")
+        validation_phone_groups = {}
+        for g in managed:
+            try:
+                members_raw = await wpp.get_group_participants(g["jid"])
+                if isinstance(members_raw, list):
+                    for m in members_raw:
+                        phone = extract_phone(m)
+                        if phone and len(phone) >= 8:
+                            if phone not in validation_phone_groups:
+                                validation_phone_groups[phone] = []
+                            validation_phone_groups[phone].append(g["name"])
+            except Exception as e:
+                logger.error(f"EXCLUSIVE_JOB: validation error for {g['name']}: {e}")
+
+        remaining_duplicates = {p: gs for p, gs in validation_phone_groups.items() if len(gs) >= 2}
+        _exclusivity_report["validation"] = {
+            "remaining_duplicates": len(remaining_duplicates),
+            "total_unique": len(validation_phone_groups),
+            "effective_removals": len(duplicates) - len(remaining_duplicates),
+            "sample_remaining": [{"phone": p, "groups": gs} for p, gs in list(remaining_duplicates.items())[:10]]
+        }
+        logger.info(f"EXCLUSIVE_JOB: VALIDATION — before={len(duplicates)}, remaining={len(remaining_duplicates)}, effective={len(duplicates) - len(remaining_duplicates)}")
+
+        _exclusivity_report["last_run"] = datetime.now().strftime("%H:%M:%S")
+        logger.info(f"EXCLUSIVE_JOB: done — {removed_count} removed, {failed_count} failed, {len(duplicates)} duplicates found")
     except Exception as e:
         logger.error(f"EXCLUSIVE_JOB: error: {e}")
+        _exclusivity_report["last_run"] = datetime.now().strftime("%H:%M:%S")
+
 
 # --- FASTAPI APP & LIFESPAN ---
 @asynccontextmanager
