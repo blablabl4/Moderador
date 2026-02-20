@@ -1663,36 +1663,50 @@ async def page_ranking(request: Request):
 # Temporary endpoint to check duplicates between groups
 @app.get("/api/admin/group-duplicates")
 async def api_group_duplicates(username: str = Depends(get_current_username)):
-    """Check duplicate members across ALL managed groups dynamically."""
-    db = SessionLocal()
+    """Check duplicate members across ALL bot groups dynamically."""
+    await ensure_token()
     try:
-        managed = db.query(WhatsAppGroup).all()
-        if not managed:
-            return {"error": "Nenhum grupo gerenciado encontrado"}
-        
+        all_groups_raw = await wpp.get_all_groups()
+        if not all_groups_raw:
+            return {"error": "Nenhum grupo encontrado", "unique_members": 0, "duplicates_count": 0}
+
+        # Parse group list into (jid, name) pairs
+        groups_list = []
+        for g in all_groups_raw:
+            if isinstance(g, dict):
+                gid = g.get("id", g.get("_serialized", ""))
+                if isinstance(gid, dict):
+                    gid = gid.get("_serialized", "")
+                gname = g.get("name", g.get("subject", str(gid)[:20]))
+            elif isinstance(g, str):
+                gid = g
+                gname = g[:20]
+            else:
+                continue
+            if gid:
+                groups_list.append((str(gid), str(gname)))
+
         def extract_phone(member):
             """Extract phone number from any WPPConnect participant format."""
             if isinstance(member, str):
                 return member.split('@')[0]
             if isinstance(member, dict):
-                # Try multiple fields
                 for field in ['id', '_serialized', 'user']:
                     val = member.get(field, '')
                     if val:
                         if isinstance(val, dict):
-                            # Nested id object: {_serialized: "55...@c.us", user: "55..."}
                             inner = val.get('_serialized', val.get('user', ''))
                             if inner:
                                 return str(inner).split('@')[0]
                         else:
                             return str(val).split('@')[0]
             return None
-        
-        # First, fetch admins using DEDICATED endpoint
-        admin_phones = set()
-        for g in managed:
+
+        # Collect admin phones to exclude
+        admin_phones = set(get_super_admins())
+        for gid, _ in groups_list:
             try:
-                admins_raw = await wpp.get_group_admins(g.group_jid)
+                admins_raw = await wpp.get_group_admins(gid)
                 if isinstance(admins_raw, list):
                     for a in admins_raw:
                         admin_phone = extract_phone(a)
@@ -1701,53 +1715,50 @@ async def api_group_duplicates(username: str = Depends(get_current_username)):
             except Exception:
                 pass
 
-        # Fetch members for each managed group
+        # Fetch members for each group
         group_members = {}
         debug_info = []
-        
-        for g in managed:
+
+        for gid, gname in groups_list:
             try:
-                members_raw = await wpp.get_group_participants(g.group_jid)
-                sample = None
+                members_raw = await wpp.get_group_participants(gid)
                 if isinstance(members_raw, list) and len(members_raw) > 0:
-                    sample = str(members_raw[0])[:200]
                     ids = set()
                     for m in members_raw:
                         phone = extract_phone(m)
-                        if phone and len(phone) > 3:  # Skip empty/invalid
+                        if phone and len(phone) > 3:
                             ids.add(phone)
-                    group_members[g.group_jid] = {
-                        "name": g.name,
+                    group_members[gid] = {
+                        "name": gname,
                         "ids": ids,
                         "total": len(ids),
                         "raw_count": len(members_raw)
                     }
-                    debug_info.append({"group": g.name, "raw_count": len(members_raw), "extracted": len(ids), "sample": sample})
-                    logger.info(f"DUPLICATES_CHECK: {g.name} - raw={len(members_raw)}, extracted={len(ids)}, sample={sample}")
+                    debug_info.append({"group": gname, "raw_count": len(members_raw), "extracted": len(ids)})
                 else:
-                    logger.warning(f"DUPLICATES_CHECK: {g.name} - no members or not a list. type={type(members_raw)}, val={str(members_raw)[:200]}")
-                    debug_info.append({"group": g.name, "raw_count": 0, "extracted": 0, "sample": str(members_raw)[:200]})
+                    debug_info.append({"group": gname, "raw_count": 0, "extracted": 0})
             except Exception as e:
-                logger.error(f"Error fetching members for {g.name}: {e}")
-                debug_info.append({"group": g.name, "error": str(e)})
-        
-        if len(group_members) < 2:
-            return {"error": "Menos de 2 grupos com dados de membros", "groups_found": len(group_members), "debug": debug_info}
-        
-        # Find duplicates
+                logger.error(f"Error fetching members for {gname}: {e}")
+                debug_info.append({"group": gname, "error": str(e)})
+
+        if not group_members:
+            return {"error": "Nenhum dado de membros obtido", "unique_members": 0, "duplicates_count": 0, "debug": debug_info}
+
+        # Find duplicates across groups
         member_groups = {}
-        for jid, info in group_members.items():
+        for gid, info in group_members.items():
             for mid in info["ids"]:
                 if mid not in member_groups:
                     member_groups[mid] = []
                 member_groups[mid].append(info["name"])
-        
-        # Exclude admins — they are supposed to be in all groups
-        duplicates = {mid: groups for mid, groups in member_groups.items() if len(groups) > 1 and mid not in admin_phones}
-        all_unique = set(member_groups.keys())
-        
-        groups_summary = [{"name": info["name"], "members": info["total"], "raw_count": info.get("raw_count", 0)} for jid, info in group_members.items()]
-        
+
+        # Exclude admins
+        non_admin_members = {mid: groups for mid, groups in member_groups.items() if mid not in admin_phones}
+        duplicates = {mid: groups for mid, groups in non_admin_members.items() if len(groups) > 1}
+        all_unique = set(non_admin_members.keys())
+
+        groups_summary = [{"name": info["name"], "members": info["total"], "raw_count": info.get("raw_count", 0)} for gid, info in group_members.items()]
+
         return {
             "groups": groups_summary,
             "total_groups": len(group_members),
@@ -1762,9 +1773,8 @@ async def api_group_duplicates(username: str = Depends(get_current_username)):
         }
     except Exception as e:
         logger.error(f"Error checking duplicates: {e}")
-        return {"error": str(e)}
-    finally:
-        db.close()
+        return {"error": str(e), "unique_members": 0, "duplicates_count": 0}
+
 
 @app.post("/api/admin/clean-duplicates")
 async def api_clean_duplicates(username: str = Depends(get_current_username)):
