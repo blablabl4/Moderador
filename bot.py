@@ -727,8 +727,13 @@ _exclusivity_report = {
 }
 _exclusivity_running = False
 
-async def job_exclusive_cleanup(force=False):
-    """Automatic job: remove duplicate members and reject duplicate pending requests."""
+async def job_exclusive_cleanup(force=False, group_ids: list = None):
+    """Automatic job: remove duplicate members and reject duplicate pending requests.
+    
+    Args:
+        force: Skip session connectivity check
+        group_ids: Optional list of group JIDs to restrict the scan to. If None, scan all groups.
+    """
     global _exclusivity_report
     try:
         # Reset report if new day
@@ -767,6 +772,12 @@ async def job_exclusive_cleanup(force=False):
                 continue
             if gid:
                 managed.append({"jid": str(gid), "name": str(gname)})
+
+        # Filter to user-selected groups if provided
+        if group_ids:
+            selected = set(str(g) for g in group_ids)
+            managed = [g for g in managed if g["jid"] in selected]
+            logger.info(f"EXCLUSIVE_JOB: filtered to {len(managed)} group(s) out of {len(managed)+len(selected - set(g['jid'] for g in managed))} by user selection")
 
         if len(managed) < 2:
             logger.info(f"EXCLUSIVE_JOB: only {len(managed)} group(s), nothing to deduplicate.")
@@ -1891,24 +1902,61 @@ async def api_exclusivity_report(username: str = Depends(get_current_username)):
     return report
 
 @app.post("/api/admin/trigger-exclusive-cleanup")
-async def api_trigger_exclusive_cleanup(username: str = Depends(get_current_username)):
-    """Manually trigger the exclusive cleanup job (runs in background)."""
+async def api_trigger_exclusive_cleanup(request: Request, username: str = Depends(get_current_username)):
+    """Manually trigger the exclusive cleanup job (runs in background).
+    
+    Optional JSON body: {"group_ids": ["jid1@g.us", "jid2@g.us"]}
+    """
     global _exclusivity_running
     if _exclusivity_running:
         return {"status": "already_running", "message": "Já está em execução"}
+
+    # Parse optional group_ids from JSON body
+    group_ids = None
+    try:
+        body = await request.json()
+        group_ids = body.get("group_ids") or None
+    except Exception:
+        pass
+
     _exclusivity_running = True
 
     async def _run():
         global _exclusivity_running
         try:
-            await job_exclusive_cleanup(force=True)
+            await job_exclusive_cleanup(force=True, group_ids=group_ids)
         except Exception as e:
             logger.error(f"Manual trigger error: {e}")
         finally:
             _exclusivity_running = False
 
     asyncio.create_task(_run())
-    return {"status": "started", "message": "Varredura iniciada em background"}
+    groups_info = f" em {len(group_ids)} grupo(s)" if group_ids else " em todos os grupos"
+    return {"status": "started", "message": f"Varredura iniciada em background{groups_info}"}
+
+@app.get("/api/admin/all-groups")
+async def api_admin_all_groups(username: str = Depends(get_current_username)):
+    """Return list of all groups the bot is part of (for the frontend group picker)."""
+    await ensure_token()
+    try:
+        raw = await wpp.get_all_groups()
+        groups = []
+        for g in (raw or []):
+            if isinstance(g, dict):
+                gid = g.get("id", g.get("_serialized", ""))
+                if isinstance(gid, dict):
+                    gid = gid.get("_serialized", "")
+                gname = g.get("name", g.get("subject", str(gid)[:30]))
+            elif isinstance(g, str):
+                gid, gname = g, g[:30]
+            else:
+                continue
+            if gid:
+                groups.append({"id": str(gid), "name": str(gname)})
+        return {"groups": groups}
+    except Exception as e:
+        logger.error(f"api_admin_all_groups error: {e}")
+        return {"groups": [], "error": str(e)}
 
 @app.get("/api/admin/group-members-list")
 async def api_group_members_list(username: str = Depends(get_current_username)):

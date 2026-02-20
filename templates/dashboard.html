@@ -1226,9 +1226,28 @@
             <div class="card">
                 <div class="card-title">🚫 Limpeza de Duplicados</div>
                 <div class="card-body">
-                    <p style="color:#888;font-size:12px;margin-bottom:16px;">Remove membros que estão em mais de um
+                    <p style="color:#888;font-size:12px;margin-bottom:12px;">Remove membros que estão em mais de um
                         grupo. Administradores são excluídos automaticamente. O membro é mantido no grupo mais antigo.
                     </p>
+
+                    <!-- Group Picker -->
+                    <div style="margin-bottom:14px;">
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                            <span
+                                style="font-size:12px;font-weight:600;color:#ccc;text-transform:uppercase;letter-spacing:0.5px;">📱
+                                Grupos para varrer</span>
+                            <div style="display:flex;gap:6px;">
+                                <button onclick="toggleAllCleanupGroups(true)" class="btn btn-outline"
+                                    style="width:auto;margin:0;padding:3px 8px;font-size:10px;">✅ Todos</button>
+                                <button onclick="toggleAllCleanupGroups(false)" class="btn btn-outline"
+                                    style="width:auto;margin:0;padding:3px 8px;font-size:10px;">❌ Nenhum</button>
+                            </div>
+                        </div>
+                        <div id="cleanup-groups-picker"
+                            style="max-height:200px;overflow-y:auto;background:rgba(0,0,0,0.2);border-radius:10px;padding:6px;border:1px solid rgba(255,255,255,0.06);">
+                            <div style="color:#666;padding:8px;text-align:center;">⏳ Carregando grupos...</div>
+                        </div>
+                    </div>
 
                     <div id="exclusivity-report"
                         style="background:rgba(0,0,0,0.2);border-radius:8px;padding:10px;margin-bottom:12px;">
@@ -1735,14 +1754,52 @@
             }
         }
 
+        async function loadCleanupGroups() {
+            const picker = document.getElementById('cleanup-groups-picker');
+            if (!picker) return;
+            try {
+                const res = await fetch('/api/admin/all-groups');
+                const data = await res.json();
+                if (data.groups && data.groups.length > 0) {
+                    picker.innerHTML = data.groups.map(g => `
+                        <label style="display:flex;align-items:center;gap:8px;padding:5px 8px;cursor:pointer;border-bottom:1px solid rgba(255,255,255,0.04);">
+                            <input type="checkbox" class="cleanup-group-cb" value="${g.id}" checked
+                                style="accent-color:#ff6b35;width:14px;height:14px;">
+                            <span style="color:#ccc;font-size:12px;">${g.name}</span>
+                        </label>`).join('');
+                } else {
+                    picker.innerHTML = '<div style="color:#666;padding:8px;text-align:center;">Nenhum grupo encontrado</div>';
+                }
+            } catch (e) {
+                picker.innerHTML = '<div style="color:#e94560;padding:8px;text-align:center;">Erro ao carregar grupos</div>';
+            }
+        }
+
+        function toggleAllCleanupGroups(checked) {
+            document.querySelectorAll('.cleanup-group-cb').forEach(cb => cb.checked = checked);
+        }
+
         async function triggerExclusiveCleanup() {
             const btn = event.target;
             const origText = btn.textContent;
             btn.textContent = '⏳ Iniciando varredura...';
             btn.disabled = true;
 
+            // Collect selected group IDs
+            const selectedIds = [...document.querySelectorAll('.cleanup-group-cb:checked')].map(cb => cb.value);
+            if (selectedIds.length === 0) {
+                alert('Selecione pelo menos um grupo para varrer.');
+                btn.textContent = origText;
+                btn.disabled = false;
+                return;
+            }
+
             try {
-                const res = await fetch('/api/admin/trigger-exclusive-cleanup', { method: 'POST' });
+                const res = await fetch('/api/admin/trigger-exclusive-cleanup', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ group_ids: selectedIds })
+                });
                 const data = await res.json();
 
                 if (data.status === 'already_running') {
@@ -1814,6 +1871,7 @@
                 btn.disabled = false;
             }
         }
+
 
         async function viewGroupMembers() {
             const btn = event.target;
@@ -2215,6 +2273,7 @@
                 loadRedirectorData();
                 loadManagedGroups();
                 setTimeout(loadBotGroups, 300);
+                setTimeout(loadCleanupGroups, 400);
             }
             if (tab === 'roleta') {
                 loadRouletteGroups();
