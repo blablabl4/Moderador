@@ -844,14 +844,16 @@ async def job_exclusive_cleanup(force=False, group_ids: list = None):
 
         # Build phone -> list of (group_jid, group_name, raw_id)
         phone_groups = {}
-        for g in managed:
+        for i, g in enumerate(managed):
             try:
+                # Pace reading to avoid rapid API calls
+                if i > 0:
+                    await asyncio.sleep(random.uniform(3.0, 5.0))
+                
                 members_raw = await wpp.get_group_participants(g["jid"])
                 count = len(members_raw) if isinstance(members_raw, list) else 0
                 logger.info(f"EXCLUSIVE_JOB: group={g['name']}, members={count}")
                 if isinstance(members_raw, list) and count > 0:
-                    sample = str(members_raw[0])[:300]
-                    logger.info(f"EXCLUSIVE_JOB: sample member of {g['name']}: {sample}")
                     for m in members_raw:
                         phone = extract_phone(m)
                         raw_id = extract_raw_id(m)
@@ -868,31 +870,63 @@ async def job_exclusive_cleanup(force=False, group_ids: list = None):
 
         removed_count = 0
         failed_count = 0
+        
+        # Prepare flat list of removals
+        to_remove = []
         for phone, groups in duplicates.items():
             keep = groups[0]
             for group_jid, group_name, raw_id in groups[1:]:
-                try:
-                    await asyncio.sleep(random.uniform(1.5, 3.0))
-                    id_to_use = raw_id if raw_id else f"{phone}@c.us"
-                    logger.info(f"EXCLUSIVE_JOB: removing {id_to_use} from {group_name}")
-                    success = await wpp.remove_participant(group_jid, id_to_use)
-                    if success:
-                        removed_count += 1
-                        _exclusivity_report["removed_members"].append({
-                            "phone": phone, "removed_from": group_name,
-                            "kept_in": keep[1], "time": datetime.now().strftime("%H:%M")
-                        })
-                        logger.info(f"EXCLUSIVE_JOB: ✅ removed {phone} from {group_name}, kept in {keep[1]}")
-                    else:
-                        failed_count += 1
-                        _exclusivity_report["removed_members"].append({
-                            "phone": phone, "removed_from": f"❌ FALHOU: {group_name}",
-                            "kept_in": keep[1], "time": datetime.now().strftime("%H:%M")
-                        })
-                        logger.warning(f"EXCLUSIVE_JOB: ❌ FAILED to remove {phone} from {group_name}")
-                except Exception as e:
+                to_remove.append({
+                    "phone": phone, 
+                    "group_jid": group_jid, 
+                    "group_name": group_name, 
+                    "raw_id": raw_id,
+                    "keep_name": keep[1]
+                })
+
+        # Process removals in BATCHES with long pauses
+        BATCH_SIZE = 5
+        for i, item in enumerate(to_remove):
+            phone = item["phone"]
+            group_jid = item["group_jid"]
+            group_name = item["group_name"]
+            raw_id = item["raw_id"]
+            keep_name = item["keep_name"]
+
+            try:
+                # Long randomized delay between individual removals (30 - 90 seconds)
+                if i > 0:
+                    delay = random.uniform(30.0, 90.0)
+                    logger.info(f"EXCLUSIVE_JOB: safer-pause {delay:.1f}s before next removal...")
+                    await asyncio.sleep(delay)
+
+                # Batch pause: every BATCH_SIZE removals, take a long break (3 - 6 minutes)
+                if i > 0 and i % BATCH_SIZE == 0:
+                    batch_pause = random.uniform(180.0, 360.0)
+                    logger.info(f"EXCLUSIVE_JOB: 🛑 BATCH COMPLETED. Taking a long rest for {batch_pause/60:.1f} minutes...")
+                    await asyncio.sleep(batch_pause)
+
+                id_to_use = raw_id if raw_id else f"{phone}@c.us"
+                logger.info(f"EXCLUSIVE_JOB: [Batch {i//BATCH_SIZE + 1}] removing {phone} from {group_name}")
+                
+                success = await wpp.remove_participant(group_jid, id_to_use)
+                if success:
+                    removed_count += 1
+                    _exclusivity_report["removed_members"].append({
+                        "phone": phone, "removed_from": group_name,
+                        "kept_in": keep_name, "time": datetime.now().strftime("%H:%M")
+                    })
+                    logger.info(f"EXCLUSIVE_JOB: ✅ removed {phone} from {group_name}")
+                else:
                     failed_count += 1
-                    logger.error(f"EXCLUSIVE_JOB: remove error {phone} from {group_name}: {e}")
+                    _exclusivity_report["removed_members"].append({
+                        "phone": phone, "removed_from": f"❌ FALHOU: {group_name}",
+                        "kept_in": keep_name, "time": datetime.now().strftime("%H:%M")
+                    })
+                    logger.warning(f"EXCLUSIVE_JOB: ❌ FAILED to remove {phone} from {group_name}")
+            except Exception as e:
+                failed_count += 1
+                logger.error(f"EXCLUSIVE_JOB: remove error {phone} from {group_name}: {e}")
 
         # --- Part 3: POST-RUN VALIDATION ---
         logger.info("EXCLUSIVE_JOB: starting post-run validation...")
@@ -2598,8 +2632,12 @@ async def handle_membership_request(group_id: str, participant_ids: list, manage
         
         found_in = None
         if other_groups:
-            for other_group in other_groups:
+            for i, other_group in enumerate(other_groups):
                 try:
+                    # Small delay between reading different groups (crawler safety)
+                    if i > 0:
+                        await asyncio.sleep(random.uniform(2.0, 4.0))
+                        
                     members = await wpp.get_group_participants(other_group)
                     if isinstance(members, list):
                         for m in members:
@@ -2621,7 +2659,10 @@ async def handle_membership_request(group_id: str, participant_ids: list, manage
         if found_in:
             # REJECT — already in another managed group
             logger.info(f"MEMBERSHIP_REJECT: {participant_id[:20]} already in {found_in[:20]}, rejecting from {group_id[:20]}")
-            await asyncio.sleep(random.uniform(1.0, 3.0))
+            
+            # Significant randomized delay before rejection (10 - 20 seconds)
+            await asyncio.sleep(random.uniform(10.0, 20.0))
+            
             rejected = await wpp.reject_participant(group_id, participant_id)
             if rejected:
                 logger.info(f"MEMBERSHIP_REJECTED: {participant_id[:20]} from {group_id[:20]}")
@@ -2647,8 +2688,12 @@ async def check_exclusive_membership(joined_group: str, participant_ids: list, g
         p_phone = participant_id.replace('@c.us','').replace('@s.whatsapp.net','').replace('@lid','').split('@')[0]
         
         found_in = None
-        for other_group in other_groups:
+        for i, other_group in enumerate(other_groups):
             try:
+                # Small delay between reading different groups (crawler safety)
+                if i > 0:
+                    await asyncio.sleep(random.uniform(2.0, 4.0))
+                    
                 members = await wpp.get_group_participants(other_group)
                 if isinstance(members, list):
                     for m in members:
@@ -2668,8 +2713,11 @@ async def check_exclusive_membership(joined_group: str, participant_ids: list, g
                 logger.error(f"Exclusive check error for group {other_group}: {e}")
         
         if found_in:
-            logger.info(f"EXCLUSIVE: {participant_id[:20]} already in {found_in[:20]}, removing from {joined_group[:20]}")
-            await asyncio.sleep(random.uniform(2.0, 5.0))  # Anti-ban delay
+            logger.info(f"EXCLUSIVE_REMOVE: {participant_id[:20]} already in {found_in[:20]}, removing from {joined_group[:20]}")
+            
+            # Significant randomized delay before removal (15 - 30 seconds)
+            await asyncio.sleep(random.uniform(15.0, 30.0))
+            
             removed = await wpp.remove_participant(joined_group, participant_id)
             if removed:
                 logger.info(f"EXCLUSIVE_REMOVED: {participant_id[:20]} removed from {joined_group[:20]}")
