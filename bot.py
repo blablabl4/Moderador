@@ -439,23 +439,37 @@ class WPPConnectClient:
                 return False
 
     async def delete_session(self):
-        """Delete session data completely (clears browser profile, forces new QR)."""
-        # Try multiple approaches to clear the session
-        async with httpx.AsyncClient(timeout=15) as client:
-            # Method 1: DELETE the session
+        """Delete session data completely (Ultra Deep Clean)."""
+        async with httpx.AsyncClient(timeout=20) as client:
+            # 1. Try Logout
             try:
-                url = f"{self.base_url}/api/{self.session}"
-                resp = await client.delete(url, headers=self.headers)
-                logger.info(f"Delete Session: {resp.status_code} - {resp.text[:200]}")
-            except Exception as e:
-                logger.warning(f"Delete session failed: {e}")
-            # Method 2: Clear session data
+                await client.post(f"{self.base_url}/api/{self.session}/logout-session", headers=self.headers)
+                await asyncio.sleep(2)
+            except: pass
+            
+            # 2. Try Close
             try:
-                url = f"{self.base_url}/api/{self.session}/clear-session-data"
-                resp = await client.post(url, headers=self.headers)
-                logger.info(f"Clear Session Data: {resp.status_code} - {resp.text[:200]}")
+                await client.post(f"{self.base_url}/api/{self.session}/close-session", headers=self.headers)
+                await asyncio.sleep(2)
+            except: pass
+            
+            # 3. Clear session data (important for cache wipe)
+            try:
+                url_clear = f"{self.base_url}/api/{self.session}/clear-session-data"
+                resp_clear = await client.post(url_clear, headers=self.headers)
+                logger.info(f"Clear Session Data: {resp_clear.status_code}")
+                await asyncio.sleep(2)
             except Exception as e:
                 logger.warning(f"Clear session data failed: {e}")
+
+            # 4. DELETE the session (final blow)
+            try:
+                url_del = f"{self.base_url}/api/{self.session}"
+                resp_del = await client.delete(url_del, headers=self.headers)
+                logger.info(f"Delete Session: {resp_del.status_code}")
+            except Exception as e:
+                logger.warning(f"Delete session failed: {e}")
+
 
     async def get_messages(self, chat_id: str, count: int = 100) -> list:
         """Load recent messages from a chat/group."""
