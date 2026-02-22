@@ -1215,16 +1215,16 @@ async def api_session_close(username: str = Depends(get_current_username)):
 
 @app.post("/api/session/logout")
 async def api_session_logout(username: str = Depends(get_current_username)):
-    """Logout from WhatsApp (clears QR, requires new scan)."""
+    """Logout from WhatsApp (clears QR, requires new scan). Performs DEEP logout."""
     await ensure_token()
-    url = f"{wpp.base_url}/api/{wpp.session}/logout-session"
     try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(url, headers=wpp.headers)
-            logger.info(f"Logout session: {resp.status_code} - {resp.text}")
-            return {"status": "success", "message": "Deslogado do WhatsApp. Escaneie o QR novamente."}
+        # Perform deep deletion of session files on WPPConnect server
+        await wpp.delete_session()
+        return {"status": "success", "message": "Sessão limpa completamente. Inicie novamente para ver o novo QR."}
     except Exception as e:
+        logger.error(f"Logout deep clean error: {e}")
         return {"status": "error", "message": str(e)}
+
 
 # --- GROUPS & SCAN ENDPOINTS ---
 
