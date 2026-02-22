@@ -24,7 +24,7 @@ import settings as cfg
 
 # --- CONFIGURATION ---
 WPP_SERVER_URL = "http://server-cli.railway.internal:8080" # FORCE URL
-SESSION_NAME = os.getenv("SESSION_NAME", "idsr_bot2")
+SESSION_NAME = cfg.get("session_name", os.getenv("SESSION_NAME", "idsr_bot2"))
 WPP_SECRET_KEY = os.getenv("WPP_SECRET_KEY", "THISISMYSECURETOKEN")
 
 # Dynamic config helpers (persisted in settings.json)
@@ -1167,7 +1167,12 @@ async def api_status(username: str = Depends(get_current_username)):
     except:
         pass
     connected = session_status in ("CONNECTED", "isLogged", "inChat")
-    return {"wpp_connected": connected, "session_status": session_status, "bot_active": True}
+    return {
+        "wpp_connected": connected, 
+        "session_status": session_status, 
+        "bot_active": True,
+        "session_id": wpp.session
+    }
 
 @app.get("/api/qr")
 async def api_qr(username: str = Depends(get_current_username)):
@@ -1229,15 +1234,43 @@ async def api_session_close(username: str = Depends(get_current_username)):
 
 @app.post("/api/session/logout")
 async def api_session_logout(username: str = Depends(get_current_username)):
-    """Logout from WhatsApp (clears QR, requires new scan). Performs DEEP logout."""
+    """Logout + Session Pivot: Clears old session and switches to a NEW session ID.
+    This is the most reliable way to force a fresh QR scan when the server is stuck.
+    """
     await ensure_token()
+    global SESSION_NAME
+    old_session = wpp.session
     try:
-        # Perform deep deletion of session files on WPPConnect server
+        # 1. Perform deep deletion of OLD session files
+        logger.info(f"PIVOT: Cleaning old session {old_session}...")
         await wpp.delete_session()
-        return {"status": "success", "message": "Sessão limpa completamente. Inicie novamente para ver o novo QR."}
+        
+        # 2. Increment the session ID (idsr_bot2 -> idsr_bot3)
+        match = re.search(r'(\d+)$', old_session)
+        if match:
+            num = int(match.group(1))
+            base = old_session[:match.start()]
+            new_session = f"{base}{num + 1}"
+        else:
+            new_session = f"{old_session}_1"
+        
+        # 3. Save new ID to settings and update memory
+        logger.info(f"PIVOT: Switching session ID from {old_session} to {new_session}")
+        cfg.save_settings({"session_name": new_session})
+        SESSION_NAME = new_session
+        wpp.session = new_session
+        
+        # Important: generate a fresh token for the new session ID
+        await wpp.generate_token()
+        
+        return {
+            "status": "success", 
+            "message": f"Sessão {old_session} removida. Novo ID: {new_session}. Inicie para ver o QR.",
+            "new_session": new_session
+        }
     except Exception as e:
-        logger.error(f"Logout deep clean error: {e}")
-        return {"status": "error", "message": str(e)}
+        logger.error(f"Logout session pivot error: {e}")
+        return {"status": "error", "message": f"Erro no pivot de sessão: {e}"}
 
 
 # --- GROUPS & SCAN ENDPOINTS ---

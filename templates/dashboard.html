@@ -893,7 +893,8 @@
                         </div>
                         <div class="status-row">
                             <span class="status-label">Sessão</span>
-                            <span class="status-value" style="color:#a78bfa;">{{ session_name }}</span>
+                            <span id="session-name-display" class="status-value" style="color:#a78bfa;">{{ session_name
+                                }}</span>
                         </div>
                     </div>
                 </div>
@@ -1374,6 +1375,7 @@
                 }
                 sb.innerText = data.session_status || 'UNKNOWN';
                 sb.className = data.wpp_connected ? 'badge badge-green' : 'badge badge-yellow';
+                if (data.session_id) document.getElementById('session-name-display').innerText = data.session_id;
                 log('Status: ' + (data.session_status || '?') + ' | Conectado: ' + (data.wpp_connected ? 'SIM ✅' : 'NÃO ❌'));
             } catch (e) { log('Erro status: ' + e); }
         }
