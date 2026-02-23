@@ -11,7 +11,7 @@ from datetime import date, datetime, timedelta
 from typing import List, Optional
 
 from fastapi import FastAPI, Request, BackgroundTasks, Depends, HTTPException, status
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
@@ -1034,6 +1034,36 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 os.makedirs("static", exist_ok=True)
 app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# --- REVERSE PROXY FOR VERCEL ---
+@app.api_route("/vendas{path:path}", methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "PATCH"])
+async def proxy_vendas(request: Request, path: str):
+    """Proxy requests from dezapegao.com.br/vendas to dezapegao.vercel.app/vendas."""
+    target_url = f"https://dezapegao.vercel.app/vendas{path}"
+    if request.query_params:
+        target_url += f"?{request.query_params}"
+
+    async with httpx.AsyncClient(follow_redirects=True) as client:
+        headers = dict(request.headers)
+        headers.pop("host", None)
+        headers["X-Forwarded-Host"] = request.headers.get("host", "dezapegao.com.br")
+        
+        try:
+            proxy_resp = await client.request(
+                method=request.method,
+                url=target_url,
+                headers=headers,
+                content=await request.body(),
+                timeout=30.0
+            )
+            return Response(
+                content=proxy_resp.content,
+                status_code=proxy_resp.status_code,
+                headers=dict(proxy_resp.headers)
+            )
+        except Exception as e:
+            logger.error(f"Proxy error for /vendas: {e}")
+            raise HTTPException(status_code=502, detail="Error proxying request to Vercel")
 
 # --- BUSINESS LOGIC HELPER ---
 LINK_REGEX = re.compile(r"(https?://|www\.|chat\.whatsapp\.com)")
