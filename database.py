@@ -91,12 +91,39 @@ class JoinTracking(Base):
 
     affiliate = relationship("Affiliate", back_populates="joins")
 
+class HourlyActivity(Base):
+    """Track message volume per hour per group for peak hour analysis."""
+    __tablename__ = "hourly_activity"
+
+    id = Column(Integer, primary_key=True, index=True)
+    date = Column(Date, index=True)
+    hour = Column(Integer)           # 0-23
+    group_id = Column(String, index=True)
+    message_count = Column(Integer, default=0)
+    media_count = Column(Integer, default=0)   # photos + videos
+    unique_senders = Column(String, default="")  # comma-separated user_ids (deduplicated later)
+
+    __table_args__ = (UniqueConstraint('date', 'hour', 'group_id', name='_hourly_group_uc'),)
+
+class MemberEvent(Base):
+    """Track every join/leave event for churn and retention analysis."""
+    __tablename__ = "member_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String, index=True)   # WhatsApp ID
+    group_id = Column(String, index=True)  # Group JID
+    event_type = Column(String, index=True)  # 'join', 'leave', 'remove', 'add'
+    event_date = Column(Date, default=date.today, index=True)
+    event_time = Column(DateTime, default=datetime.utcnow)
+
 def init_db():
     Base.metadata.create_all(bind=engine)
-    # Migration: add window_start column if missing
+    # Migration: add new columns/tables if missing
     try:
         from sqlalchemy import inspect, text
         insp = inspect(engine)
+        
+        # Migration 1: window_start in user_stats
         cols = [c['name'] for c in insp.get_columns('user_stats')]
         if 'window_start' not in cols:
             with engine.connect() as conn:

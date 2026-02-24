@@ -19,7 +19,7 @@ import traceback
 from pydantic import BaseModel
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy.orm import Session
-from database import SessionLocal, UserStats, WhatsAppGroup, Affiliate, JoinTracking, init_db
+from database import SessionLocal, UserStats, WhatsAppGroup, Affiliate, JoinTracking, HourlyActivity, MemberEvent, init_db
 import settings as cfg
 
 # --- CONFIGURATION ---
@@ -1407,6 +1407,131 @@ async def api_analytics_advertisers(username: str = Depends(get_current_username
                 "total_messages": row.total_msgs or 0,
                 "groups_active_in": row.groups_active_in
             } for row in top_advertisers]
+        }
+    finally:
+        db.close()
+
+@app.get("/api/analytics/metrics")
+async def api_analytics_metrics(username: str = Depends(get_current_username)):
+    """Comprehensive metrics: peak hours, churn rate, retention, member flow."""
+    from sqlalchemy import func, case
+    db = SessionLocal()
+    try:
+        # --- 1. PEAK HOURS: average msgs per hour across all groups ---
+        peak_hours = db.query(
+            HourlyActivity.hour,
+            func.sum(HourlyActivity.message_count).label("total_msgs"),
+            func.sum(HourlyActivity.media_count).label("total_media"),
+            func.count(func.distinct(HourlyActivity.date)).label("days_counted")
+        ).group_by(HourlyActivity.hour).order_by(HourlyActivity.hour).all()
+        
+        peak_data = []
+        for row in peak_hours:
+            avg_msgs = round(row.total_msgs / max(row.days_counted, 1), 1)
+            peak_data.append({
+                "hour": row.hour,
+                "label": f"{row.hour:02d}:00",
+                "total_msgs": row.total_msgs,
+                "total_media": row.total_media,
+                "avg_msgs_per_day": avg_msgs,
+                "days_counted": row.days_counted
+            })
+        
+        # Find the top 3 golden hours
+        golden_hours = sorted(peak_data, key=lambda x: x["avg_msgs_per_day"], reverse=True)[:3]
+        
+        # --- 2. MEMBER FLOW: joins vs leaves per day ---
+        thirty_days_ago = date.today() - timedelta(days=30)
+        
+        daily_flow = db.query(
+            MemberEvent.event_date,
+            func.sum(case((MemberEvent.event_type.in_(['add', 'join']), 1), else_=0)).label("joins"),
+            func.sum(case((MemberEvent.event_type.in_(['leave', 'remove']), 1), else_=0)).label("leaves")
+        ).filter(
+            MemberEvent.event_date >= thirty_days_ago
+        ).group_by(MemberEvent.event_date).order_by(MemberEvent.event_date.desc()).all()
+        
+        flow_data = [{
+            "date": str(row.event_date),
+            "joins": row.joins or 0,
+            "leaves": row.leaves or 0,
+            "net": (row.joins or 0) - (row.leaves or 0)
+        } for row in daily_flow]
+        
+        # --- 3. CHURN RATE ---
+        total_joins = db.query(func.count()).filter(
+            MemberEvent.event_type.in_(['add', 'join']),
+            MemberEvent.event_date >= thirty_days_ago
+        ).scalar() or 0
+        
+        total_leaves = db.query(func.count()).filter(
+            MemberEvent.event_type.in_(['leave', 'remove']),
+            MemberEvent.event_date >= thirty_days_ago
+        ).scalar() or 0
+        
+        churn_rate = round((total_leaves / max(total_joins, 1)) * 100, 1)
+        
+        # --- 4. RETENTION: users who joined and are still present ---
+        # Check which users joined but never left (within tracking period)
+        joined_users = db.query(
+            MemberEvent.user_id,
+            func.min(MemberEvent.event_date).label("first_join")
+        ).filter(
+            MemberEvent.event_type.in_(['add', 'join'])
+        ).group_by(MemberEvent.user_id).subquery()
+        
+        left_users = db.query(
+            MemberEvent.user_id
+        ).filter(
+            MemberEvent.event_type.in_(['leave', 'remove'])
+        ).distinct().subquery()
+        
+        # Users who joined but never left
+        retained = db.query(func.count()).select_from(joined_users).filter(
+            ~joined_users.c.user_id.in_(db.query(left_users.c.user_id))
+        ).scalar() or 0
+        
+        total_ever_joined = db.query(func.count()).select_from(joined_users).scalar() or 0
+        retention_rate = round((retained / max(total_ever_joined, 1)) * 100, 1)
+        
+        # --- 5. CHURN BY GROUP ---
+        churn_by_group = db.query(
+            MemberEvent.group_id,
+            func.sum(case((MemberEvent.event_type.in_(['add', 'join']), 1), else_=0)).label("joins"),
+            func.sum(case((MemberEvent.event_type.in_(['leave', 'remove']), 1), else_=0)).label("leaves")
+        ).filter(
+            MemberEvent.event_date >= thirty_days_ago
+        ).group_by(MemberEvent.group_id).all()
+        
+        # Build group name mapping
+        group_names = {}
+        managed = db.query(WhatsAppGroup).all()
+        for g in managed:
+            group_names[g.group_jid] = g.name
+        
+        group_churn = [{
+            "group_id": row.group_id,
+            "group_name": group_names.get(row.group_id, row.group_id[:25]),
+            "joins": row.joins or 0,
+            "leaves": row.leaves or 0,
+            "churn_pct": round(((row.leaves or 0) / max(row.joins or 0, 1)) * 100, 1)
+        } for row in churn_by_group]
+        
+        return {
+            "peak_hours": peak_data,
+            "golden_hours": [{"hour": h["label"], "avg_msgs": h["avg_msgs_per_day"]} for h in golden_hours],
+            "member_flow": {
+                "daily": flow_data,
+                "totals_30d": {
+                    "joins": total_joins,
+                    "leaves": total_leaves,
+                    "net_growth": total_joins - total_leaves,
+                    "churn_rate_pct": churn_rate,
+                    "retention_rate_pct": retention_rate
+                }
+            },
+            "churn_by_group": group_churn,
+            "data_note": "Tracking started on deploy. More data = more accuracy."
         }
     finally:
         db.close()
@@ -2932,8 +3057,8 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
         if isinstance(msg, dict):
             background_tasks.add_task(handle_participant_change, msg)
         
-        # Always check exclusivity for managed (redirector) groups
-        if action in ('add', 'join'):
+        # --- TRACK MEMBER EVENTS (join/leave/remove) for churn analytics ---
+        if action in ('add', 'join', 'leave', 'remove'):
             group_id = msg.get('groupId', '') or msg.get('chatId', '')
             who = msg.get('who', '') or msg.get('participantId', '')
             
@@ -2947,29 +3072,49 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
             log_entry["group"] = group_id
             log_entry["participants"] = [p[:20] for p in participants]
             
-            # --- BLOCKED NUMBERS: auto-kick with anti-ban delay ---
-            BLOCKED_NUMBERS = {"5511915254569"}
-            for p in participants:
-                p_bare = p.split('@')[0]
-                if p_bare in BLOCKED_NUMBERS:
-                    logger.warning(f"BLOCKED_NUMBER: {p_bare} joined {group_id[:25]} — scheduling removal")
-                    background_tasks.add_task(_kick_blocked_number, group_id, p)
-                    log_entry["blocked_kick"] = p_bare
-            
-            # Build list of all managed group JIDs from DB
-            managed_jids = []
+            # Record member events in DB
             try:
-                db_exc = SessionLocal()
-                managed_jids = [g.group_jid for g in db_exc.query(WhatsAppGroup).filter_by(is_active=True).all()]
-                db_exc.close()
+                db_ev = SessionLocal()
+                from datetime import timezone
+                now_utc = datetime.now(timezone.utc)
+                now_br = now_utc - timedelta(hours=3)  # BRT
+                for p in participants:
+                    db_ev.add(MemberEvent(
+                        user_id=p,
+                        group_id=group_id,
+                        event_type=action,
+                        event_date=now_br.date(),
+                        event_time=now_br
+                    ))
+                db_ev.commit()
+                db_ev.close()
             except Exception as e:
-                logger.error(f"Error loading managed groups for exclusive check: {e}")
+                logger.error(f"Error recording member event: {e}")
             
-            if managed_jids and group_id in managed_jids and participants:
-                background_tasks.add_task(
-                    check_exclusive_membership, group_id, participants, managed_jids
-                )
-                log_entry["status"] = "exclusive_check_queued"
+            # --- BLOCKED NUMBERS: auto-kick with anti-ban delay ---
+            if action in ('add', 'join'):
+                BLOCKED_NUMBERS = {"5511915254569"}
+                for p in participants:
+                    p_bare = p.split('@')[0]
+                    if p_bare in BLOCKED_NUMBERS:
+                        logger.warning(f"BLOCKED_NUMBER: {p_bare} joined {group_id[:25]} — scheduling removal")
+                        background_tasks.add_task(_kick_blocked_number, group_id, p)
+                        log_entry["blocked_kick"] = p_bare
+                
+                # Build list of all managed group JIDs from DB
+                managed_jids = []
+                try:
+                    db_exc = SessionLocal()
+                    managed_jids = [g.group_jid for g in db_exc.query(WhatsAppGroup).filter_by(is_active=True).all()]
+                    db_exc.close()
+                except Exception as e:
+                    logger.error(f"Error loading managed groups for exclusive check: {e}")
+                
+                if managed_jids and group_id in managed_jids and participants:
+                    background_tasks.add_task(
+                        check_exclusive_membership, group_id, participants, managed_jids
+                    )
+                    log_entry["status"] = "exclusive_check_queued"
         
         _log_webhook(log_entry)
         return {"status": log_entry.get("status", "participant_event")}
@@ -3067,6 +3212,40 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
         log_entry["status"] = "ignored_system_text"
         _log_webhook(log_entry)
         return {"status": "ignored_system_text"}
+    
+    # --- TRACK HOURLY ACTIVITY for peak hour analysis ---
+    if is_group and chat_id:
+        try:
+            from datetime import timezone
+            now_utc = datetime.now(timezone.utc)
+            now_br = now_utc - timedelta(hours=3)
+            db_ha = SessionLocal()
+            ha = db_ha.query(HourlyActivity).filter_by(
+                date=now_br.date(), hour=now_br.hour, group_id=chat_id
+            ).first()
+            is_media = msg_type in ('image', 'video', 'ptt', 'audio', 'document', 'sticker')
+            if ha:
+                ha.message_count += 1
+                if is_media:
+                    ha.media_count += 1
+                # Track unique senders (comma-separated)
+                existing = set(ha.unique_senders.split(',')) if ha.unique_senders else set()
+                existing.discard('')
+                existing.add(sender_id)
+                ha.unique_senders = ','.join(existing)
+            else:
+                db_ha.add(HourlyActivity(
+                    date=now_br.date(),
+                    hour=now_br.hour,
+                    group_id=chat_id,
+                    message_count=1,
+                    media_count=1 if is_media else 0,
+                    unique_senders=sender_id
+                ))
+            db_ha.commit()
+            db_ha.close()
+        except Exception as e:
+            logger.error(f"Error tracking hourly activity: {e}")
     
     # --- Build set of sender identifiers for admin matching ---
     # Handles @c.us, @lid, and plain phone formats
