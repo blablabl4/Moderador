@@ -2240,6 +2240,155 @@ async def api_trigger_exclusive_cleanup(request: Request, username: str = Depend
     groups_info = f" em {len(group_ids)} grupo(s)" if group_ids else " em todos os grupos"
     return {"status": "started", "message": f"Varredura iniciada em background{groups_info}"}
 
+@app.post("/api/admin/cleanup-target-group")
+async def api_cleanup_target_group(request: Request, username: str = Depends(get_current_username)):
+    """Scan ALL groups, but remove duplicates ONLY from a specific target group.
+    
+    JSON body: {"target_group_id": "120363408281153077@g.us"}
+    """
+    try:
+        body = await request.json()
+        target_group_id = body.get("target_group_id", "")
+    except Exception:
+        return {"error": "JSON body with 'target_group_id' is required"}
+    
+    if not target_group_id:
+        return {"error": "target_group_id is required"}
+
+    async def _run_targeted():
+        await ensure_token()
+        
+        # 1. Get ALL groups
+        all_groups_raw = await wpp.get_all_groups()
+        if not all_groups_raw:
+            logger.info("TARGETED_CLEANUP: no groups found")
+            return
+        
+        groups = []
+        for g in all_groups_raw:
+            if isinstance(g, dict):
+                gid = g.get("id", g.get("_serialized", ""))
+                if isinstance(gid, dict):
+                    gid = gid.get("_serialized", "")
+                gname = g.get("name", g.get("subject", str(gid)[:20]))
+            elif isinstance(g, str):
+                gid, gname = g, g[:20]
+            else:
+                continue
+            if gid:
+                groups.append({"jid": str(gid), "name": str(gname)})
+        
+        logger.info(f"TARGETED_CLEANUP: Found {len(groups)} groups, target={target_group_id[:25]}")
+        
+        def extract_phone(member):
+            if isinstance(member, str):
+                return member.split('@')[0]
+            if isinstance(member, dict):
+                for field in ['id', '_serialized', 'user']:
+                    val = member.get(field, '')
+                    if val:
+                        if isinstance(val, dict):
+                            inner = val.get('_serialized', val.get('user', ''))
+                            if inner:
+                                return str(inner).split('@')[0]
+                        else:
+                            return str(val).split('@')[0]
+            return None
+        
+        def extract_raw_id(member):
+            if isinstance(member, str):
+                return member
+            if isinstance(member, dict):
+                for f in ['id', '_serialized']:
+                    v = member.get(f, '')
+                    if isinstance(v, dict):
+                        s = v.get('_serialized', '')
+                        if s:
+                            return str(s)
+                    elif v:
+                        return str(v)
+            return None
+        
+        # 2. Get admin phones to exclude
+        admin_phones = set(get_super_admins())
+        for g in groups:
+            try:
+                admins_raw = await wpp.get_group_admins(g["jid"])
+                if isinstance(admins_raw, list):
+                    for a in admins_raw:
+                        ap = extract_phone(a)
+                        if ap and len(ap) > 3:
+                            admin_phones.add(ap)
+            except Exception:
+                pass
+        
+        # 3. Fetch members of ALL groups
+        all_members = {}  # phone -> set of group_jids
+        target_members = {}  # phone -> raw_id (only for target group)
+        
+        for i, g in enumerate(groups):
+            if i > 0:
+                await asyncio.sleep(random.uniform(2.0, 4.0))
+            try:
+                members_raw = await wpp.get_group_participants(g["jid"])
+                if isinstance(members_raw, list):
+                    logger.info(f"TARGETED_CLEANUP: {g['name']} = {len(members_raw)} members")
+                    for m in members_raw:
+                        phone = extract_phone(m)
+                        if phone and len(phone) >= 8:
+                            if phone not in all_members:
+                                all_members[phone] = set()
+                            all_members[phone].add(g["jid"])
+                            if g["jid"] == target_group_id:
+                                target_members[phone] = extract_raw_id(m)
+            except Exception as e:
+                logger.error(f"TARGETED_CLEANUP: error fetching {g['name']}: {e}")
+        
+        # 4. Find duplicates: people in target group AND at least 1 other group
+        to_remove = []
+        for phone, groups_set in all_members.items():
+            if target_group_id in groups_set and len(groups_set) >= 2 and phone not in admin_phones:
+                raw_id = target_members.get(phone)
+                other_groups = [gid for gid in groups_set if gid != target_group_id]
+                to_remove.append({"phone": phone, "raw_id": raw_id, "other_groups": other_groups})
+        
+        logger.info(f"TARGETED_CLEANUP: {len(to_remove)} duplicates to remove from target group")
+        
+        # 5. Remove ONLY from target group
+        removed = 0
+        failed = 0
+        BATCH_SIZE = 5
+        for i, item in enumerate(to_remove):
+            try:
+                if i > 0:
+                    delay = random.uniform(30.0, 90.0)
+                    logger.info(f"TARGETED_CLEANUP: pause {delay:.0f}s before next...")
+                    await asyncio.sleep(delay)
+                
+                if i > 0 and i % BATCH_SIZE == 0:
+                    batch_pause = random.uniform(180.0, 360.0)
+                    logger.info(f"TARGETED_CLEANUP: batch pause {batch_pause/60:.1f}min")
+                    await asyncio.sleep(batch_pause)
+                
+                id_to_use = item["raw_id"] if item["raw_id"] else f"{item['phone']}@c.us"
+                logger.info(f"TARGETED_CLEANUP: removing {item['phone']} from target (also in {len(item['other_groups'])} other group(s))")
+                
+                success = await wpp.remove_participant(target_group_id, id_to_use)
+                if success:
+                    removed += 1
+                    logger.info(f"TARGETED_CLEANUP: ✅ removed {item['phone']}")
+                else:
+                    failed += 1
+                    logger.warning(f"TARGETED_CLEANUP: ❌ failed {item['phone']}")
+            except Exception as e:
+                failed += 1
+                logger.error(f"TARGETED_CLEANUP: error {item['phone']}: {e}")
+        
+        logger.info(f"TARGETED_CLEANUP: DONE. Removed={removed}, Failed={failed}, Total={len(to_remove)}")
+    
+    asyncio.create_task(_run_targeted())
+    return {"status": "started", "target_group": target_group_id, "message": "Varredura iniciada. Remoções APENAS do grupo alvo."}
+
 @app.get("/api/admin/all-groups")
 async def api_admin_all_groups(username: str = Depends(get_current_username)):
     """Return list of all groups the bot is part of (for the frontend group picker)."""
