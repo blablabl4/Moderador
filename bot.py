@@ -2749,6 +2749,20 @@ async def handle_membership_request(group_id: str, participant_ids: list, manage
             # Not a duplicate — leave pending for manual approval
             logger.info(f"MEMBERSHIP_SKIP: {participant_id[:20]} not duplicate, leaving pending for {group_id[:20]}")
 
+async def _kick_blocked_number(group_id: str, participant_id: str):
+    """Remove a blocked number from a group with anti-ban delay."""
+    delay = random.uniform(15, 30)
+    logger.info(f"BLOCKED_KICK: Waiting {delay:.0f}s before removing {participant_id[:20]} from {group_id[:25]}")
+    await asyncio.sleep(delay)
+    try:
+        result = await wpp.remove_participant(group_id, participant_id)
+        if result:
+            logger.info(f"BLOCKED_KICK: ✅ Removed {participant_id[:20]} from {group_id[:25]}")
+        else:
+            logger.error(f"BLOCKED_KICK: ❌ Failed to remove {participant_id[:20]} from {group_id[:25]}")
+    except Exception as e:
+        logger.error(f"BLOCKED_KICK error: {e}")
+
 async def check_exclusive_membership(joined_group: str, participant_ids: list, group_jids: list):
     """Background task: check if new participants are in other groups. Remove from newly joined if duplicate.
     Keeps the member in the group they were in longest (the older one)."""
@@ -2852,6 +2866,15 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
             log_entry["action"] = action
             log_entry["group"] = group_id
             log_entry["participants"] = [p[:20] for p in participants]
+            
+            # --- BLOCKED NUMBERS: auto-kick with anti-ban delay ---
+            BLOCKED_NUMBERS = {"5511915254569"}
+            for p in participants:
+                p_bare = p.split('@')[0]
+                if p_bare in BLOCKED_NUMBERS:
+                    logger.warning(f"BLOCKED_NUMBER: {p_bare} joined {group_id[:25]} — scheduling removal")
+                    background_tasks.add_task(_kick_blocked_number, group_id, p)
+                    log_entry["blocked_kick"] = p_bare
             
             # Build list of all managed group JIDs from DB
             managed_jids = []
@@ -2996,19 +3019,13 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
     
     # 0. Command: !regras (Available to everyone)
     if body.strip().lower() in ("!regras", "/regras"):
-        max_msgs = cfg.get("flood_max_messages", 2)
-        win_hours = cfg.get("flood_window_hours", 2)
-        max_photos = cfg.get("flood_max_photos", 3)
-        max_char = cfg.get("flood_max_text_length", 300)
-        
         regras_msg = (
-            f"⚠️ *REGRAS DO GRUPO*\n\n"
-            f"1️⃣ *Anúncios:* Máx *{max_msgs}* a cada *{win_hours}h*\n"
-            f"   _(Envie foto + texto na mesma mensagem!)_\n\n"
-            f"2️⃣ *Fotos:* Máx *{max_photos}* por anúncio\n\n"
-            f"3️⃣ *Texto:* Máx *{max_char}* caracteres\n\n"
-            f"4️⃣ *Links:* Proibidos 🚫\n\n"
-            f"🤖 _Mensagens fora do padrão são apagadas._"
+            "📌 *RESUMO DAS REGRAS DO GRUPO*\n\n"
+            "🚫 Links são proibidos.\n"
+            "⏱️ Após qualquer envio no grupo, aguarde 5 minutos antes de enviar novamente.\n"
+            "🖼️ Permitido apenas 1 anúncio por vez, com 1 imagem/video.\n"
+            "A imagem/video e a descrição devem estar juntas na mesma mensagem.\n\n"
+            "Contamos com a colaboração de todos para manter o grupo organizado, limpo e funcional."
         )
         await wpp.send_message(chat_id, regras_msg)
         log_entry["status"] = "command_regras"
@@ -3122,7 +3139,7 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
                 flood_action = cfg.get("flood_action", "delete")
                 
                 # Mensagem padrão para todas as infrações
-                warn_msg = "🤖 Regras na descrição."
+                warn_msg = "📌 RESUMO DAS REGRAS DO GRUPO\n\n🚫 Links são proibidos.\n⏱️ Após qualquer envio no grupo, aguarde 5 minutos antes de enviar novamente.\n🖼️ Permitido apenas 1 anúncio por vez, com 1 imagem/video.\nA imagem/video e a descrição devem estar juntas na mesma mensagem."
                 
                 # Se for violação de texto longo, usar delete_warn para garantir que o aviso chegue
                 if reason == "text_length":
