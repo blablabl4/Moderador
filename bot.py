@@ -2199,21 +2199,28 @@ async def api_pending_requests(username: str = Depends(get_current_username)):
 @app.get("/api/groups/managed")
 async def api_managed_groups_list(username: str = Depends(get_current_username)):
     """List all managed groups with real-time member counts from WhatsApp."""
-    # Sync real member counts from bot
     await ensure_token()
-    all_wpp_groups = await wpp.get_all_groups()
-    wpp_sizes = {}
-    for g in all_wpp_groups:
-        info = parse_group(g)
-        wpp_sizes[info["id"]] = info["size"]
     
     db = SessionLocal()
     try:
         groups = db.query(WhatsAppGroup).order_by(WhatsAppGroup.display_order).all()
-        for g in groups:
-            real = wpp_sizes.get(g.group_jid, g.current_members)
-            g.current_members = real
-            g.is_active = real < g.max_members
+        
+        # Fetch REAL member counts in parallel for all managed groups
+        async def get_real_count(jid: str) -> int:
+            try:
+                members = await wpp.get_group_participants(jid)
+                if isinstance(members, list):
+                    return len(members)
+            except Exception as e:
+                logger.warning(f"Could not get real count for {jid[:25]}: {e}")
+            return 0
+        
+        real_counts = await asyncio.gather(*[get_real_count(g.group_jid) for g in groups])
+        
+        for g, real in zip(groups, real_counts):
+            if real > 0:
+                g.current_members = real
+            g.is_active = g.current_members < g.max_members
             # Auto-fetch missing invite links
             if not g.invite_link or g.invite_link in ('#', ''):
                 try:
