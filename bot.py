@@ -1338,6 +1338,79 @@ async def api_groups_list(username: str = Depends(get_current_username)):
     result = [parse_group(g) for g in groups]
     return {"groups": result, "total": len(result)}
 
+@app.get("/api/analytics/advertisers")
+async def api_analytics_advertisers(username: str = Depends(get_current_username)):
+    """Get unique advertiser stats across all groups for capacity planning."""
+    from sqlalchemy import func, text
+    db = SessionLocal()
+    try:
+        # 1. Total unique advertisers (all time)
+        total_unique = db.query(func.count(func.distinct(UserStats.user_id))).scalar() or 0
+        
+        # 2. Unique advertisers per group
+        per_group = db.query(
+            UserStats.group_id,
+            func.count(func.distinct(UserStats.user_id)).label("unique_users"),
+            func.sum(UserStats.message_count).label("total_msgs")
+        ).group_by(UserStats.group_id).all()
+        
+        # 3. Active advertisers (posted in last 7 days)
+        seven_days_ago = date.today() - timedelta(days=7)
+        active_7d = db.query(func.count(func.distinct(UserStats.user_id))).filter(
+            UserStats.last_active_date >= seven_days_ago
+        ).scalar() or 0
+        
+        # 4. Active advertisers (posted today)
+        active_today = db.query(func.count(func.distinct(UserStats.user_id))).filter(
+            UserStats.last_active_date == date.today()
+        ).scalar() or 0
+        
+        # 5. Daily breakdown (last 7 days)
+        daily = db.query(
+            UserStats.last_active_date,
+            func.count(func.distinct(UserStats.user_id)).label("unique_users"),
+            func.sum(UserStats.message_count).label("total_msgs")
+        ).filter(
+            UserStats.last_active_date >= seven_days_ago
+        ).group_by(UserStats.last_active_date).order_by(UserStats.last_active_date.desc()).all()
+        
+        # 6. Top 20 advertisers by message count
+        top_advertisers = db.query(
+            UserStats.user_id,
+            func.sum(UserStats.message_count).label("total_msgs"),
+            func.count(func.distinct(UserStats.group_id)).label("groups_active_in")
+        ).group_by(UserStats.user_id).order_by(func.sum(UserStats.message_count).desc()).limit(20).all()
+        
+        # Build group name mapping
+        group_names = {}
+        managed = db.query(WhatsAppGroup).all()
+        for g in managed:
+            group_names[g.group_jid] = g.name
+        
+        return {
+            "total_unique_advertisers": total_unique,
+            "active_last_7_days": active_7d,
+            "active_today": active_today,
+            "per_group": [{
+                "group_id": row.group_id,
+                "group_name": group_names.get(row.group_id, row.group_id[:25]),
+                "unique_users": row.unique_users,
+                "total_messages": row.total_msgs or 0
+            } for row in per_group],
+            "daily_breakdown": [{
+                "date": str(row.last_active_date),
+                "unique_users": row.unique_users,
+                "total_messages": row.total_msgs or 0
+            } for row in daily],
+            "top_advertisers": [{
+                "user_id": row.user_id[:25],
+                "total_messages": row.total_msgs or 0,
+                "groups_active_in": row.groups_active_in
+            } for row in top_advertisers]
+        }
+    finally:
+        db.close()
+
 @app.get("/api/groups/{group_id}/participants")
 async def api_group_participants(group_id: str, username: str = Depends(get_current_username)):
     """Get all participants of a specific group using group-members endpoint."""
