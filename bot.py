@@ -1268,6 +1268,33 @@ async def debug_wpp_apis(username: str = Depends(get_current_username)):
                 results[ep] = {"error": str(e)}
     return results
 
+@app.get("/api/debug/test-forward")
+async def debug_test_forward(messageId: str, phone: str, username: str = Depends(get_current_username)):
+    """Test forward-messages with a specific messageId."""
+    await ensure_token()
+    fwd_url = f"{wpp.base_url}/api/{wpp.session}/forward-messages"
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        payload = {"phone": phone, "messageId": messageId, "isGroup": True}
+        resp = await client.post(fwd_url, json=payload, headers=wpp.headers)
+        return {"status": resp.status_code, "body": resp.json() if resp.text else {}}
+
+@app.get("/api/debug/last-msgs")
+async def debug_last_msgs(chat: str, username: str = Depends(get_current_username)):
+    """List last 10 messages from a chat with their IDs."""
+    await ensure_token()
+    msgs = await wpp.get_messages(chat, count=20)
+    result = []
+    for m in msgs[-10:]:
+        mid = m.get('id', {})
+        result.append({
+            "type": m.get('type'),
+            "body_len": len(str(m.get('body',''))),
+            "id_serialized": mid.get('_serialized','') if isinstance(mid,dict) else str(mid),
+            "fromMe": mid.get('fromMe') if isinstance(mid,dict) else None,
+            "timestamp": m.get('timestamp'),
+        })
+    return result
+
 @app.get("/api/qr")
 async def api_qr(username: str = Depends(get_current_username)):
     """Proxy the QR code from wppconnect-server."""
