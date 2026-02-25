@@ -3547,7 +3547,7 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
     log_entry["group_admin_ids_sample"] = list(group_admin_ids)[:5]
     
     if is_group_admin:
-        # --- ADMIN REPLY BROADCAST: re-send quoted message content to other groups ---
+        # --- ADMIN REPLY BROADCAST: forward quoted message to other groups ---
         quoted_msg = msg.get('quotedMsg') or msg.get('quotedMsgObj') or {}
         
         if quoted_msg and isinstance(quoted_msg, dict):
@@ -3557,130 +3557,116 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
             q_mimetype = quoted_msg.get('mimetype', '') or ''
             q_filename = quoted_msg.get('filename', '') or ''
             
-            # Get the quoted message stanza ID to download full quality media
+            # Stanza ID and sender JID — needed to build the correct WID for forward-messages
             q_stanza_id = msg.get('quotedStanzaID', '') or msg.get('quotedMsgId', '')
+            # The sender of the quoted message (could be phone@c.us or lid@lid.us)
+            q_sender = (quoted_msg.get('author') or quoted_msg.get('sender') or
+                        quoted_msg.get('from') or quoted_msg.get('chatId') or '')
+            if isinstance(q_sender, dict):
+                q_sender = q_sender.get('_serialized', '') or q_sender.get('id', '')
             
-            # For media messages, body = base64 data (compressed), caption = text
-            # For text messages, body = the text content
             is_media = q_type in ('image', 'video', 'audio', 'ptt', 'document', 'sticker')
+            has_content = bool((is_media and q_body) or (not is_media and q_body))
             
-            logger.info(f"ADMIN_BROADCAST: Admin replied in {chat_id[:25]}, type={q_type}, is_media={is_media}, body_len={len(q_body)}, caption={q_caption[:30] if q_caption else 'none'}, mime={q_mimetype}, stanzaId={q_stanza_id[:30] if q_stanza_id else 'none'}")
+            logger.info(f"ADMIN_BROADCAST: type={q_type}, stanzaId={q_stanza_id[:30] if q_stanza_id else 'none'}, sender={q_sender[:30] if q_sender else 'none'}, body_len={len(q_body)}")
             
-            has_content = (is_media and q_body) or (not is_media and q_body)
-            
-            if has_content:
-                async def _broadcast_resend(origin_chat: str, msg_type: str, body: str, caption: str, mimetype: str, filename: str, is_media_msg: bool, stanza_id: str):
+            if has_content or q_stanza_id:
+                async def _broadcast_forward(origin_chat: str, msg_type: str, body: str, caption: str,
+                                              mimetype: str, filename: str, is_media_msg: bool,
+                                              stanza_id: str, sender_jid: str):
                     try:
                         await ensure_token()
                         # --- TEST MODE: send only to the same group ---
                         success = False
                         
-                        if is_media_msg:
-                            # Try to download full-quality media first
-                            full_base64 = None
-                            mime = mimetype or 'application/octet-stream'
+                        # === STRATEGY 1: forward-messages API ===
+                        # WPPConnect WID format: false_{senderJid}_{stanzaId}
+                        # sender_jid = the JID of who sent the original message
+                        if stanza_id and sender_jid:
+                            fwd_ids = [
+                                f"false_{sender_jid}_{stanza_id}",
+                                f"true_{sender_jid}_{stanza_id}",
+                            ]
+                            # Also try with chat ID if sender differs from chat
+                            if sender_jid != origin_chat:
+                                fwd_ids.append(f"false_{origin_chat}_{stanza_id}")
+                                fwd_ids.append(f"true_{origin_chat}_{stanza_id}")
                             
-                            if stanza_id:
-                                # Construct possible message IDs (WPPConnect WID format)
-                                possible_ids = [
-                                    f"false_{origin_chat}_{stanza_id}",
-                                    f"true_{origin_chat}_{stanza_id}",
-                                    stanza_id,  # raw stanza ID
-                                ]
+                            fwd_url = f"{wpp.base_url}/api/{wpp.session}/forward-messages"
+                            async with httpx.AsyncClient(timeout=30.0) as client:
+                                for fwd_id in fwd_ids:
+                                    try:
+                                        payload = {
+                                            "phone": origin_chat,
+                                            "messageId": fwd_id,
+                                            "isGroup": True,
+                                        }
+                                        resp = await client.post(fwd_url, json=payload, headers=wpp.headers)
+                                        logger.info(f"ADMIN_BROADCAST: forward-messages id={fwd_id[:50]} resp: {resp.status_code} - {resp.text[:200]}")
+                                        if resp.status_code in (200, 201):
+                                            r = resp.json() if resp.text else {}
+                                            if r.get("status") != "error":
+                                                success = True
+                                                logger.info(f"ADMIN_BROADCAST: ✅ Forwarded with id={fwd_id[:40]}")
+                                                break
+                                    except Exception as e:
+                                        logger.warning(f"ADMIN_BROADCAST: forward error: {e}")
+                        
+                        # === STRATEGY 2: re-send with isForwarded:true (fallback) ===
+                        if not success:
+                            logger.info("ADMIN_BROADCAST: forward-messages failed, falling back to resend with isForwarded:true")
+                            
+                            if is_media_msg and body:
+                                # Clean base64
+                                media_b64 = body
+                                if media_b64.startswith("data:"):
+                                    media_b64 = media_b64.split(",", 1)[-1] if "," in media_b64 else media_b64
+                                mime = mimetype or 'application/octet-stream'
+                                base64_data = f"data:{mime};base64,{media_b64}"
                                 
-                                async with httpx.AsyncClient(timeout=30.0) as client:
-                                    for mid in possible_ids:
-                                        try:
-                                            # Try download-media endpoint
-                                            dl_url = f"{wpp.base_url}/api/{wpp.session}/download-media"
-                                            dl_resp = await client.post(dl_url, json={"messageId": mid}, headers=wpp.headers)
-                                            logger.info(f"ADMIN_BROADCAST: download-media ({mid[:50]}) resp: {dl_resp.status_code} body: {dl_resp.text[:300]}")
-                                            if dl_resp.status_code in (200, 201):
-                                                dl_body = dl_resp.json() if dl_resp.text else {}
-                                                b64 = dl_body.get("base64") or dl_body.get("data") or dl_body.get("result", "")
-                                                if isinstance(b64, str) and len(b64) > 500:
-                                                    full_base64 = b64
-                                                    mime = dl_body.get("mimetype", mime)
-                                                    logger.info(f"ADMIN_BROADCAST: ✅ Downloaded full media, len={len(full_base64)}")
-                                                    break
-                                        except Exception as e:
-                                            logger.warning(f"ADMIN_BROADCAST: download-media error: {e}")
-                                        
-                                        try:
-                                            # Try get-media-by-message endpoint
-                                            gm_url = f"{wpp.base_url}/api/{wpp.session}/get-media-by-message/{mid}"
-                                            gm_resp = await client.get(gm_url, headers=wpp.headers)
-                                            logger.info(f"ADMIN_BROADCAST: get-media ({mid[:50]}) resp: {gm_resp.status_code} body: {gm_resp.text[:300]}")
-                                            if gm_resp.status_code in (200, 201):
-                                                gm_body = gm_resp.json() if gm_resp.text else {}
-                                                media_data = gm_body.get("base64") or gm_body.get("data") or gm_body.get("result")
-                                                if media_data and isinstance(media_data, str) and len(media_data) > 500:
-                                                    full_base64 = media_data
-                                                    mime = gm_body.get("mimetype", mime)
-                                                    logger.info(f"ADMIN_BROADCAST: ✅ Got full media via get-media, len={len(full_base64)}")
-                                                    break
-                                        except Exception as e:
-                                            logger.warning(f"ADMIN_BROADCAST: get-media error: {e}")
-                            
-                            # Use full quality if available, otherwise fallback to webhook base64
-                            media_base64 = full_base64 or body
-                            if full_base64:
-                                logger.info(f"ADMIN_BROADCAST: Using FULL quality media ({len(media_base64)} chars)")
-                            else:
-                                logger.info(f"ADMIN_BROADCAST: Using webhook base64 (fallback, {len(media_base64)} chars)")
-                            
-                            # Clean base64: remove data URI prefix if present
-                            if media_base64.startswith("data:"):
-                                media_base64 = media_base64.split(",", 1)[-1] if "," in media_base64 else media_base64
-                            
-                            base64_data = f"data:{mime};base64,{media_base64}"
-                            
-                            # Use send-image for image types, send-file for others
-                            is_image = msg_type in ('image',) or 'image' in mime
-                            if is_image:
-                                url = f"{wpp.base_url}/api/{wpp.session}/send-image"
-                            else:
-                                url = f"{wpp.base_url}/api/{wpp.session}/send-file"
-                            
-                            payload = {
-                                "phone": origin_chat,
-                                "isGroup": True,
-                                "base64": base64_data,
-                            }
-                            if caption:
-                                payload["caption"] = caption
-                            if filename:
-                                payload["filename"] = filename
-                            else:
+                                is_image = msg_type == 'image' or 'image' in mime
+                                ep = "send-image" if is_image else "send-file"
+                                url = f"{wpp.base_url}/api/{wpp.session}/{ep}"
+                                
                                 ext = mime.split('/')[-1].split(';')[0]
                                 if ext == 'jpeg': ext = 'jpg'
-                                payload["filename"] = f"media.{ext}"
+                                
+                                payload = {
+                                    "phone": origin_chat,
+                                    "isGroup": True,
+                                    "base64": base64_data,
+                                    "filename": filename or f"media.{ext}",
+                                    "isForwarded": True,
+                                }
+                                if caption:
+                                    payload["caption"] = caption
+                                
+                                logger.info(f"ADMIN_BROADCAST: Sending via {ep} with isForwarded=True")
+                                async with httpx.AsyncClient(timeout=60.0) as client:
+                                    resp = await client.post(url, json=payload, headers=wpp.headers)
+                                    logger.info(f"ADMIN_BROADCAST: {ep} resp: {resp.status_code} - {resp.text[:200]}")
+                                    if resp.status_code in (200, 201):
+                                        r = resp.json() if resp.text else {}
+                                        success = r.get("status") != "error"
                             
-                            ep_name = "send-image" if is_image else "send-file"
-                            logger.info(f"ADMIN_BROADCAST [TEST]: Sending via {ep_name} ({mime}) to {origin_chat[:25]}")
-                            async with httpx.AsyncClient(timeout=60.0) as client:
-                                resp = await client.post(url, json=payload, headers=wpp.headers)
-                                logger.info(f"ADMIN_BROADCAST [TEST]: {ep_name} resp: {resp.status_code} - {resp.text[:300]}")
-                                if resp.status_code in (200, 201):
-                                    resp_body = resp.json() if resp.text else {}
-                                    success = resp_body.get("status") != "error"
-                        else:
-                            # Text message — just send the body
-                            logger.info(f"ADMIN_BROADCAST [TEST]: Sending text to {origin_chat[:25]}, len={len(body)}")
-                            await wpp.send_message(origin_chat, body, skip_typing=True)
-                            success = True
+                            elif body:
+                                # Text message
+                                logger.info(f"ADMIN_BROADCAST: Sending text with send-message")
+                                result = await wpp.send_message(origin_chat, body, skip_typing=True)
+                                success = True
                         
                         if success:
-                            logger.info(f"ADMIN_BROADCAST [TEST]: ✅ sent to same group")
-                            await wpp.send_message(origin_chat, "✅ [TESTE] Mensagem replicada com sucesso!", skip_typing=True)
+                            logger.info("ADMIN_BROADCAST [TEST]: ✅ sent")
+                            await wpp.send_message(origin_chat, "✅ [TESTE] Mensagem encaminhada!", skip_typing=True)
                         else:
-                            logger.warning(f"ADMIN_BROADCAST [TEST]: ❌ send failed")
-                            await wpp.send_message(origin_chat, "❌ [TESTE] Falha ao replicar mensagem.", skip_typing=True)
+                            logger.warning("ADMIN_BROADCAST [TEST]: ❌ failed")
+                            await wpp.send_message(origin_chat, "❌ [TESTE] Falha ao encaminhar mensagem.", skip_typing=True)
                     except Exception as e:
                         logger.error(f"ADMIN_BROADCAST [TEST]: error: {e}")
                         await wpp.send_message(origin_chat, f"❌ [TESTE] Erro: {e}", skip_typing=True)
                 
-                background_tasks.add_task(_broadcast_resend, chat_id, q_type, q_body, q_caption, q_mimetype, q_filename, is_media, q_stanza_id)
+                background_tasks.add_task(_broadcast_forward, chat_id, q_type, q_body, q_caption,
+                                           q_mimetype, q_filename, is_media, q_stanza_id, q_sender)
                 log_entry["status"] = "admin_broadcast"
                 _log_webhook(log_entry)
                 return {"status": "admin_broadcast_started"}
