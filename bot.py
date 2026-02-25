@@ -3556,81 +3556,86 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
             q_caption = quoted_msg.get('caption', '') or ''
             q_mimetype = quoted_msg.get('mimetype', '') or ''
             q_filename = quoted_msg.get('filename', '') or ''
-            
-            # Stanza ID and sender JID — needed to build the correct WID for forward-messages
             q_stanza_id = msg.get('quotedStanzaID', '') or msg.get('quotedMsgId', '')
-            # The sender of the quoted message (could be phone@c.us or lid@lid.us)
-            q_sender = (quoted_msg.get('author') or quoted_msg.get('sender') or
-                        quoted_msg.get('from') or quoted_msg.get('chatId') or '')
-            if isinstance(q_sender, dict):
-                q_sender = q_sender.get('_serialized', '') or q_sender.get('id', '')
             
             is_media = q_type in ('image', 'video', 'audio', 'ptt', 'document', 'sticker')
             has_content = bool((is_media and q_body) or (not is_media and q_body))
             
-            logger.info(f"ADMIN_BROADCAST: type={q_type}, stanzaId={q_stanza_id[:30] if q_stanza_id else 'none'}, sender={q_sender[:30] if q_sender else 'none'}, body_len={len(q_body)}")
+            # Log full quotedMsg keys for debugging
+            logger.info(f"ADMIN_BROADCAST: type={q_type}, stanzaId={q_stanza_id[:30] if q_stanza_id else 'none'}, quotedMsg_keys={list(quoted_msg.keys())}")
+            logger.info(f"ADMIN_BROADCAST: quotedMsg.author={quoted_msg.get('author','')}, quotedMsg.from={quoted_msg.get('from','')}, quotedMsg.sender={quoted_msg.get('sender','')}")
             
             if has_content or q_stanza_id:
                 async def _broadcast_forward(origin_chat: str, msg_type: str, body: str, caption: str,
                                               mimetype: str, filename: str, is_media_msg: bool,
-                                              stanza_id: str, sender_jid: str):
+                                              stanza_id: str):
                     try:
                         await ensure_token()
                         # --- TEST MODE: send only to the same group ---
                         success = False
                         
-                        # === STRATEGY 1: forward-messages API ===
-                        # WPPConnect WID format: false_{senderJid}_{stanzaId}
-                        # sender_jid = the JID of who sent the original message
-                        if stanza_id and sender_jid:
-                            fwd_ids = [
-                                f"false_{sender_jid}_{stanza_id}",
-                                f"true_{sender_jid}_{stanza_id}",
-                            ]
-                            # Also try with chat ID if sender differs from chat
-                            if sender_jid != origin_chat:
-                                fwd_ids.append(f"false_{origin_chat}_{stanza_id}")
-                                fwd_ids.append(f"true_{origin_chat}_{stanza_id}")
-                            
+                        # === STRATEGY 1: Find the exact message ID from WPP's message history ===
+                        # This gives us the correct _serialized WID that WPP actually stores
+                        correct_serialized_id = None
+                        if stanza_id:
+                            try:
+                                messages = await wpp.get_messages(origin_chat, count=50)
+                                for m in messages:
+                                    m_id = m.get('id', {})
+                                    m_stanza = ''
+                                    if isinstance(m_id, dict):
+                                        m_stanza = m_id.get('id', '') or m_id.get('_serialized', '')
+                                        # Extract stanza part from _serialized (format: false_CHAT_STANZA)
+                                        ser = m_id.get('_serialized', '')
+                                        if ser:
+                                            parts = ser.split('_', 2)
+                                            if len(parts) == 3 and parts[2] == stanza_id:
+                                                correct_serialized_id = ser
+                                                break
+                                    elif isinstance(m_id, str):
+                                        m_stanza = m_id
+                                    if m_stanza == stanza_id or (m_stanza and m_stanza.endswith(f'_{stanza_id}')):
+                                        if isinstance(m_id, dict) and m_id.get('_serialized'):
+                                            correct_serialized_id = m_id['_serialized']
+                                            break
+                                if correct_serialized_id:
+                                    logger.info(f"ADMIN_BROADCAST: ✅ Found message in history: {correct_serialized_id[:60]}")
+                                else:
+                                    logger.info(f"ADMIN_BROADCAST: ❌ Message not found in history (stanza={stanza_id[:30]}), tried {len(messages)} msgs")
+                            except Exception as e:
+                                logger.warning(f"ADMIN_BROADCAST: get_messages error: {e}")
+                        
+                        # Try forward-messages with the exact serialized ID
+                        if correct_serialized_id:
                             fwd_url = f"{wpp.base_url}/api/{wpp.session}/forward-messages"
                             async with httpx.AsyncClient(timeout=30.0) as client:
-                                for fwd_id in fwd_ids:
-                                    try:
-                                        payload = {
-                                            "phone": origin_chat,
-                                            "messageId": fwd_id,
-                                            "isGroup": True,
-                                        }
-                                        resp = await client.post(fwd_url, json=payload, headers=wpp.headers)
-                                        logger.info(f"ADMIN_BROADCAST: forward-messages id={fwd_id[:50]} resp: {resp.status_code} - {resp.text[:200]}")
-                                        if resp.status_code in (200, 201):
-                                            r = resp.json() if resp.text else {}
-                                            if r.get("status") != "error":
-                                                success = True
-                                                logger.info(f"ADMIN_BROADCAST: ✅ Forwarded with id={fwd_id[:40]}")
-                                                break
-                                    except Exception as e:
-                                        logger.warning(f"ADMIN_BROADCAST: forward error: {e}")
+                                payload = {
+                                    "phone": origin_chat,
+                                    "messageId": correct_serialized_id,
+                                    "isGroup": True,
+                                }
+                                resp = await client.post(fwd_url, json=payload, headers=wpp.headers)
+                                logger.info(f"ADMIN_BROADCAST: forward-messages resp: {resp.status_code} - {resp.text[:300]}")
+                                if resp.status_code in (200, 201):
+                                    r = resp.json() if resp.text else {}
+                                    if r.get("status") != "error":
+                                        success = True
+                                        logger.info("ADMIN_BROADCAST: ✅ Forwarded successfully!")
                         
                         # === STRATEGY 2: re-send with isForwarded:true (fallback) ===
                         if not success:
-                            logger.info("ADMIN_BROADCAST: forward-messages failed, falling back to resend with isForwarded:true")
-                            
+                            logger.info("ADMIN_BROADCAST: fell back to resend with isForwarded:true")
                             if is_media_msg and body:
-                                # Clean base64
                                 media_b64 = body
                                 if media_b64.startswith("data:"):
                                     media_b64 = media_b64.split(",", 1)[-1] if "," in media_b64 else media_b64
                                 mime = mimetype or 'application/octet-stream'
                                 base64_data = f"data:{mime};base64,{media_b64}"
-                                
                                 is_image = msg_type == 'image' or 'image' in mime
                                 ep = "send-image" if is_image else "send-file"
                                 url = f"{wpp.base_url}/api/{wpp.session}/{ep}"
-                                
                                 ext = mime.split('/')[-1].split(';')[0]
                                 if ext == 'jpeg': ext = 'jpg'
-                                
                                 payload = {
                                     "phone": origin_chat,
                                     "isGroup": True,
@@ -3640,19 +3645,14 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
                                 }
                                 if caption:
                                     payload["caption"] = caption
-                                
-                                logger.info(f"ADMIN_BROADCAST: Sending via {ep} with isForwarded=True")
                                 async with httpx.AsyncClient(timeout=60.0) as client:
                                     resp = await client.post(url, json=payload, headers=wpp.headers)
                                     logger.info(f"ADMIN_BROADCAST: {ep} resp: {resp.status_code} - {resp.text[:200]}")
                                     if resp.status_code in (200, 201):
                                         r = resp.json() if resp.text else {}
                                         success = r.get("status") != "error"
-                            
                             elif body:
-                                # Text message
-                                logger.info(f"ADMIN_BROADCAST: Sending text with send-message")
-                                result = await wpp.send_message(origin_chat, body, skip_typing=True)
+                                await wpp.send_message(origin_chat, body, skip_typing=True)
                                 success = True
                         
                         if success:
@@ -3660,13 +3660,13 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
                             await wpp.send_message(origin_chat, "✅ [TESTE] Mensagem encaminhada!", skip_typing=True)
                         else:
                             logger.warning("ADMIN_BROADCAST [TEST]: ❌ failed")
-                            await wpp.send_message(origin_chat, "❌ [TESTE] Falha ao encaminhar mensagem.", skip_typing=True)
+                            await wpp.send_message(origin_chat, "❌ [TESTE] Falha ao encaminhar.", skip_typing=True)
                     except Exception as e:
                         logger.error(f"ADMIN_BROADCAST [TEST]: error: {e}")
                         await wpp.send_message(origin_chat, f"❌ [TESTE] Erro: {e}", skip_typing=True)
                 
                 background_tasks.add_task(_broadcast_forward, chat_id, q_type, q_body, q_caption,
-                                           q_mimetype, q_filename, is_media, q_stanza_id, q_sender)
+                                           q_mimetype, q_filename, is_media, q_stanza_id)
                 log_entry["status"] = "admin_broadcast"
                 _log_webhook(log_entry)
                 return {"status": "admin_broadcast_started"}
