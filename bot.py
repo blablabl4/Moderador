@@ -3574,6 +3574,14 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
     log_entry["group_admin_ids_sample"] = list(group_admin_ids)[:5]
     
     if is_group_admin:
+        # --- ADMIN REPLY BROADCAST: only in the configured test group ---
+        test_group = cfg.get("broadcast_test_group_id", "")
+        if test_group and group_id != test_group:
+            # Not the test group — just bypass moderation silently
+            log_entry["status"] = "group_admin_bypass"
+            _log_webhook(log_entry)
+            return {"status": "group_admin_bypass"}
+        
         # --- ADMIN REPLY BROADCAST: forward quoted message to other groups ---
         quoted_msg = msg.get('quotedMsg') or msg.get('quotedMsgObj') or {}
         
