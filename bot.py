@@ -3723,8 +3723,7 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
     # 5. STICKER FILTER — Delete ALL stickers automatically
     if msg_type == 'sticker' and cfg.get("sticker_filter_enabled", True):
         logger.info(f"STICKER_BLOCKED: {sender_id[:20]} in {group_id[:20]}")
-        warn_msg = "🚨 Figurinhas não são permitidas neste grupo! 🚨"
-        enforce_result = await enforce_action("delete_warn", group_id, msg_id, warn_msg, sender_id=sender_id)
+        enforce_result = await enforce_action("delete", group_id, msg_id, "", sender_id=sender_id)
         log_entry["status"] = "sticker_blocked"
         log_entry["enforce_result"] = enforce_result
         _log_webhook(log_entry)
@@ -3733,8 +3732,7 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
     # 5b. STATUS SHARE FILTER — Block shared WhatsApp status updates
     if msg_type == 'status' or (msg_type in ('image', 'video', 'chat') and 'Status de' in body):
         logger.info(f"STATUS_SHARE_BLOCKED: {sender_id[:20]} in {group_id[:20]}, type={msg_type}")
-        warn_msg = "🚨 Compartilhamento de status não é permitido neste grupo! 🚨"
-        enforce_result = await enforce_action("delete_warn", group_id, msg_id, warn_msg, sender_id=sender_id)
+        enforce_result = await enforce_action("delete", group_id, msg_id, "", sender_id=sender_id)
         log_entry["status"] = "status_share_blocked"
         log_entry["enforce_result"] = enforce_result
         _log_webhook(log_entry)
@@ -3769,17 +3767,8 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
             if not result["allowed"]:
                 reason = result.get("reason", "flood")
                 logger.info(f"BLOCKED: ({reason}) {sender_id[:20]} in {group_id[:20]}")
-                
-                flood_action = cfg.get("flood_action", "delete")
-                
-                # Mensagem padrão para todas as infrações
-                warn_msg = "📌 RESUMO DAS REGRAS DO GRUPO\n\n🚫 Links são proibidos.\n⏱️ Após qualquer envio no grupo, aguarde 5 minutos antes de enviar novamente.\n🖼️ Permitido apenas 1 anúncio por vez, com 1 imagem/video.\nA imagem/video e a descrição devem estar juntas na mesma mensagem."
-                
-                # Se for violação de texto longo, usar delete_warn para garantir que o aviso chegue
-                if reason == "text_length":
-                    flood_action = "delete_warn"
-                
-                enforce_result = await enforce_action(flood_action, group_id, msg_id, warn_msg, sender_id=sender_id)
+                # Silent delete — no educational message
+                enforce_result = await enforce_action("delete", group_id, msg_id, "", sender_id=sender_id)
                 log_entry["status"] = f"violation_{reason}"
                 log_entry["enforce_result"] = enforce_result
                 _log_webhook(log_entry)
