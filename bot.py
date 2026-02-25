@@ -3528,29 +3528,87 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
             q_mimetype = quoted_msg.get('mimetype', '') or ''
             q_filename = quoted_msg.get('filename', '') or ''
             
-            # For media messages, body = base64 data, caption = text
+            # Get the quoted message stanza ID to download full quality media
+            q_stanza_id = msg.get('quotedStanzaID', '') or msg.get('quotedMsgId', '')
+            
+            # For media messages, body = base64 data (compressed), caption = text
             # For text messages, body = the text content
             is_media = q_type in ('image', 'video', 'audio', 'ptt', 'document', 'sticker')
             
-            logger.info(f"ADMIN_BROADCAST: Admin replied in {chat_id[:25]}, type={q_type}, is_media={is_media}, body_len={len(q_body)}, caption={q_caption[:30] if q_caption else 'none'}, mime={q_mimetype}")
+            logger.info(f"ADMIN_BROADCAST: Admin replied in {chat_id[:25]}, type={q_type}, is_media={is_media}, body_len={len(q_body)}, caption={q_caption[:30] if q_caption else 'none'}, mime={q_mimetype}, stanzaId={q_stanza_id[:30] if q_stanza_id else 'none'}")
             
             has_content = (is_media and q_body) or (not is_media and q_body)
             
             if has_content:
-                async def _broadcast_resend(origin_chat: str, msg_type: str, body: str, caption: str, mimetype: str, filename: str, is_media_msg: bool):
+                async def _broadcast_resend(origin_chat: str, msg_type: str, body: str, caption: str, mimetype: str, filename: str, is_media_msg: bool, stanza_id: str):
                     try:
                         await ensure_token()
                         # --- TEST MODE: send only to the same group ---
                         success = False
                         
-                        if is_media_msg and body:
-                            # body contains base64 data for media messages
-                            # Use send-file endpoint with base64
-                            url = f"{wpp.base_url}/api/{wpp.session}/send-file"
-                            
-                            # Build the base64 data URI
+                        if is_media_msg:
+                            # Try to download full-quality media first
+                            full_base64 = None
                             mime = mimetype or 'application/octet-stream'
-                            base64_data = f"data:{mime};base64,{body}"
+                            
+                            if stanza_id:
+                                # Construct possible message IDs
+                                possible_ids = [
+                                    f"false_{origin_chat}_{stanza_id}",
+                                    f"true_{origin_chat}_{stanza_id}",
+                                ]
+                                
+                                async with httpx.AsyncClient(timeout=30.0) as client:
+                                    for mid in possible_ids:
+                                        try:
+                                            # Try download-media endpoint
+                                            dl_url = f"{wpp.base_url}/api/{wpp.session}/download-media"
+                                            dl_resp = await client.post(dl_url, json={"messageId": mid}, headers=wpp.headers)
+                                            logger.info(f"ADMIN_BROADCAST: download-media ({mid[:40]}) resp: {dl_resp.status_code}")
+                                            if dl_resp.status_code in (200, 201):
+                                                dl_body = dl_resp.json() if dl_resp.text else {}
+                                                if dl_body.get("base64"):
+                                                    full_base64 = dl_body["base64"]
+                                                    mime = dl_body.get("mimetype", mime)
+                                                    logger.info(f"ADMIN_BROADCAST: ✅ Downloaded full media, len={len(full_base64)}")
+                                                    break
+                                                elif dl_body.get("data"):
+                                                    full_base64 = dl_body["data"]
+                                                    logger.info(f"ADMIN_BROADCAST: ✅ Downloaded full media (data), len={len(full_base64)}")
+                                                    break
+                                        except Exception as e:
+                                            logger.warning(f"ADMIN_BROADCAST: download-media error: {e}")
+                                        
+                                        try:
+                                            # Try get-media-by-message endpoint
+                                            gm_url = f"{wpp.base_url}/api/{wpp.session}/get-media-by-message/{mid}"
+                                            gm_resp = await client.get(gm_url, headers=wpp.headers)
+                                            logger.info(f"ADMIN_BROADCAST: get-media ({mid[:40]}) resp: {gm_resp.status_code}")
+                                            if gm_resp.status_code in (200, 201):
+                                                gm_body = gm_resp.json() if gm_resp.text else {}
+                                                media_data = gm_body.get("base64") or gm_body.get("data") or gm_body.get("result")
+                                                if media_data and isinstance(media_data, str) and len(media_data) > 100:
+                                                    full_base64 = media_data
+                                                    mime = gm_body.get("mimetype", mime)
+                                                    logger.info(f"ADMIN_BROADCAST: ✅ Got full media via get-media, len={len(full_base64)}")
+                                                    break
+                                        except Exception as e:
+                                            logger.warning(f"ADMIN_BROADCAST: get-media error: {e}")
+                            
+                            # Use full quality if available, otherwise fallback to webhook base64
+                            media_base64 = full_base64 or body
+                            if full_base64:
+                                logger.info(f"ADMIN_BROADCAST: Using FULL quality media ({len(media_base64)} chars)")
+                            else:
+                                logger.info(f"ADMIN_BROADCAST: Using webhook base64 (fallback, {len(media_base64)} chars)")
+                            
+                            # Clean base64: remove data URI prefix if present
+                            if media_base64.startswith("data:"):
+                                media_base64 = media_base64.split(",", 1)[-1] if "," in media_base64 else media_base64
+                            
+                            # Send with send-file  
+                            url = f"{wpp.base_url}/api/{wpp.session}/send-file"
+                            base64_data = f"data:{mime};base64,{media_base64}"
                             
                             payload = {
                                 "phone": origin_chat,
@@ -3562,12 +3620,11 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
                             if filename:
                                 payload["filename"] = filename
                             else:
-                                # Generate a filename from mimetype
                                 ext = mime.split('/')[-1].split(';')[0]
                                 if ext == 'jpeg': ext = 'jpg'
                                 payload["filename"] = f"media.{ext}"
                             
-                            logger.info(f"ADMIN_BROADCAST [TEST]: Sending media ({mime}) to {origin_chat[:25]}, base64_len={len(body)}")
+                            logger.info(f"ADMIN_BROADCAST [TEST]: Sending media ({mime}) to {origin_chat[:25]}")
                             async with httpx.AsyncClient(timeout=60.0) as client:
                                 resp = await client.post(url, json=payload, headers=wpp.headers)
                                 logger.info(f"ADMIN_BROADCAST [TEST]: send-file resp: {resp.status_code} - {resp.text[:300]}")
@@ -3576,9 +3633,8 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
                                     success = resp_body.get("status") != "error"
                         else:
                             # Text message — just send the body
-                            text = body
-                            logger.info(f"ADMIN_BROADCAST [TEST]: Sending text to {origin_chat[:25]}, len={len(text)}")
-                            await wpp.send_message(origin_chat, text, skip_typing=True)
+                            logger.info(f"ADMIN_BROADCAST [TEST]: Sending text to {origin_chat[:25]}, len={len(body)}")
+                            await wpp.send_message(origin_chat, body, skip_typing=True)
                             success = True
                         
                         if success:
@@ -3591,7 +3647,7 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
                         logger.error(f"ADMIN_BROADCAST [TEST]: error: {e}")
                         await wpp.send_message(origin_chat, f"❌ [TESTE] Erro: {e}", skip_typing=True)
                 
-                background_tasks.add_task(_broadcast_resend, chat_id, q_type, q_body, q_caption, q_mimetype, q_filename, is_media)
+                background_tasks.add_task(_broadcast_resend, chat_id, q_type, q_body, q_caption, q_mimetype, q_filename, is_media, q_stanza_id)
                 log_entry["status"] = "admin_broadcast"
                 _log_webhook(log_entry)
                 return {"status": "admin_broadcast_started"}
