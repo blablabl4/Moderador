@@ -3516,43 +3516,17 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
             async def _broadcast_forward(origin_chat: str, fwd_msg_id: str):
                 try:
                     await ensure_token()
-                    all_groups_raw = await wpp.get_all_groups()
-                    if not all_groups_raw:
-                        logger.warning("ADMIN_BROADCAST: no groups found")
-                        return
-                    
-                    forwarded = 0
-                    failed = 0
-                    for g in all_groups_raw:
-                        if isinstance(g, dict):
-                            gid = g.get('id', g.get('_serialized', ''))
-                            if isinstance(gid, dict):
-                                gid = gid.get('_serialized', '')
-                        elif isinstance(g, str):
-                            gid = g
-                        else:
-                            continue
-                        
-                        if not gid or str(gid) == origin_chat:
-                            continue
-                        if '@g.us' not in str(gid):
-                            continue
-                        
-                        try:
-                            await asyncio.sleep(random.uniform(1.0, 3.0))
-                            success = await wpp.forward_messages(str(gid), fwd_msg_id)
-                            if success:
-                                forwarded += 1
-                            else:
-                                failed += 1
-                        except Exception as e:
-                            failed += 1
-                            logger.error(f"ADMIN_BROADCAST: error forwarding to {str(gid)[:25]}: {e}")
-                    
-                    logger.info(f"ADMIN_BROADCAST: DONE. Forwarded to {forwarded} groups, failed={failed}")
-                    await wpp.send_message(origin_chat, f"\u2705 Mensagem replicada para {forwarded} grupo(s).", skip_typing=True)
+                    # --- TEST MODE: forward only to the same group ---
+                    success = await wpp.forward_messages(origin_chat, fwd_msg_id)
+                    if success:
+                        logger.info(f"ADMIN_BROADCAST [TEST]: ✅ forwarded to same group")
+                        await wpp.send_message(origin_chat, "✅ [TESTE] Mensagem replicada com sucesso! (modo teste: só neste grupo)", skip_typing=True)
+                    else:
+                        logger.warning(f"ADMIN_BROADCAST [TEST]: ❌ forward failed")
+                        await wpp.send_message(origin_chat, "❌ [TESTE] Falha ao replicar mensagem.", skip_typing=True)
                 except Exception as e:
-                    logger.error(f"ADMIN_BROADCAST: error: {e}")
+                    logger.error(f"ADMIN_BROADCAST [TEST]: error: {e}")
+                    await wpp.send_message(origin_chat, f"❌ [TESTE] Erro: {e}", skip_typing=True)
             
             background_tasks.add_task(_broadcast_forward, chat_id, quoted_msg_id)
             log_entry["status"] = "admin_broadcast"
