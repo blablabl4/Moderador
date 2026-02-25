@@ -3627,102 +3627,127 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
                                               stanza_id: str, participant: str, id_serialized: str):
                     try:
                         await ensure_token()
-                        # --- TEST MODE: send only to the same group ---
                         success = False
-                        
-                        # Build candidate IDs for forward-messages
-                        # Priority: 1) id directly from webhook quotedMsg.id._serialized
-                        #           2) false_{quotedParticipant}_{stanzaId} (correct WPP WID)
-                        #           3) Chat history lookup
-                        candidate_ids = []
-                        if id_serialized:
-                            candidate_ids.append(id_serialized)
-                        if stanza_id and participant:
-                            candidate_ids.append(f"false_{participant}_{stanza_id}")
-                            candidate_ids.append(f"true_{participant}_{stanza_id}")
-                        if stanza_id and not participant:
-                            # Try chat history to get exact ID
+                        real_msg_id = None
+
+                        # === STEP 1: Find the exact _serialized ID from chat history ===
+                        # This is the only reliable way to get a valid WID for forward-messages
+                        if stanza_id:
                             try:
-                                messages = await wpp.get_messages(origin_chat, count=50)
-                                for m in messages:
+                                messages = await wpp.get_messages(origin_chat, count=100)
+                                logger.info(f"ADMIN_BROADCAST: searching {len(messages) if messages else 0} msgs for stanza_id={stanza_id[:20]}")
+                                for m in (messages or []):
                                     m_id = m.get('id', {})
                                     if isinstance(m_id, dict):
                                         ser = m_id.get('_serialized', '')
-                                        if ser:
-                                            parts = ser.split('_', 2)
-                                            if len(parts) == 3 and parts[2] == stanza_id:
-                                                candidate_ids.insert(0, ser)
-                                                break
+                                        # The stanza ID is the last part of _serialized (after the 2nd underscore)
+                                        parts = ser.split('_', 2)
+                                        if len(parts) == 3 and parts[2] == stanza_id:
+                                            real_msg_id = ser
+                                            logger.info(f"ADMIN_BROADCAST: ✅ found real_msg_id={ser[:60]}")
+                                            break
                             except Exception as e:
                                 logger.warning(f"ADMIN_BROADCAST: get_messages error: {e}")
-                        
-                        logger.info(f"ADMIN_BROADCAST: Trying forward with candidates={[c[:50] for c in candidate_ids]}")
-                        
+
+                        # Fallback candidates if history lookup failed
+                        if not real_msg_id:
+                            if id_serialized:
+                                real_msg_id = id_serialized
+                                logger.info(f"ADMIN_BROADCAST: using id_serialized as fallback: {real_msg_id[:60]}")
+                            elif stanza_id and participant:
+                                real_msg_id = f"false_{participant}_{stanza_id}"
+                                logger.info(f"ADMIN_BROADCAST: using constructed WID as fallback: {real_msg_id[:60]}")
+
+                        # === STEP 2: Get target groups (all monitored groups except origin) ===
+                        try:
+                            db = SessionLocal()
+                            all_groups = db.query(WhatsAppGroup).filter(WhatsAppGroup.is_active == True).all()
+                            db.close()
+                            target_groups = [g.group_id for g in all_groups if g.group_id != origin_chat]
+                        except Exception as e:
+                            logger.warning(f"ADMIN_BROADCAST: DB error getting groups: {e}")
+                            target_groups = []
+
+                        # TEST MODE: if no other groups, send back to origin for testing
+                        if not target_groups:
+                            target_groups = [origin_chat]
+                            logger.info("ADMIN_BROADCAST: TEST MODE — no other groups, sending to origin")
+
+                        logger.info(f"ADMIN_BROADCAST: real_msg_id={str(real_msg_id)[:60]}, targets={len(target_groups)} groups")
+
+                        # === STEP 3: Forward to each target group ===
                         fwd_url = f"{wpp.base_url}/api/{wpp.session}/forward-messages"
-                        async with httpx.AsyncClient(timeout=30.0) as client:
-                            for cid in candidate_ids:
-                                payload = {
-                                    "phone": origin_chat,
-                                    "messageId": cid,
-                                    "isGroup": True,
-                                }
-                                resp = await client.post(fwd_url, json=payload, headers=wpp.headers)
-                                logger.info(f"ADMIN_BROADCAST: forward-messages id={cid[:50]}, resp:{resp.status_code} - {resp.text[:200]}")
-                                if resp.status_code in (200, 201):
-                                    r = resp.json() if resp.text else {}
-                                    if r.get("status") != "error":
-                                        success = True
-                                        logger.info(f"ADMIN_BROADCAST: ✅ Forwarded! id={cid[:40]}")
-                                        break
-                        
-                        # === STRATEGY 2: re-send with isForwarded:true (fallback) ===
-                        if not success:
-                            logger.info("ADMIN_BROADCAST: fell back to resend with isForwarded:true")
-                            if is_media_msg and body:
-                                media_b64 = body
-                                if media_b64.startswith("data:"):
-                                    media_b64 = media_b64.split(",", 1)[-1] if "," in media_b64 else media_b64
-                                mime = mimetype or 'application/octet-stream'
-                                base64_data = f"data:{mime};base64,{media_b64}"
-                                is_image = msg_type == 'image' or 'image' in mime
-                                ep = "send-image" if is_image else "send-file"
-                                url = f"{wpp.base_url}/api/{wpp.session}/{ep}"
-                                ext = mime.split('/')[-1].split(';')[0]
-                                if ext == 'jpeg': ext = 'jpg'
-                                payload = {
-                                    "phone": origin_chat,
-                                    "isGroup": True,
-                                    "base64": base64_data,
-                                    "filename": filename or f"media.{ext}",
-                                    "isForwarded": True,
-                                }
-                                if caption:
-                                    payload["caption"] = caption
-                                async with httpx.AsyncClient(timeout=60.0) as client:
-                                    resp = await client.post(url, json=payload, headers=wpp.headers)
-                                    logger.info(f"ADMIN_BROADCAST: {ep} resp: {resp.status_code} - {resp.text[:200]}")
+                        for target_group in target_groups:
+                            group_success = False
+                            if real_msg_id:
+                                try:
+                                    payload = {
+                                        "phone": target_group,
+                                        "messageId": real_msg_id,
+                                        "isGroup": "@g.us" in target_group,
+                                    }
+                                    async with httpx.AsyncClient(timeout=30.0) as client:
+                                        resp = await client.post(fwd_url, json=payload, headers=wpp.headers)
+                                    logger.info(f"ADMIN_BROADCAST: forward to {target_group[:25]}: {resp.status_code} - {resp.text[:200]}")
                                     if resp.status_code in (200, 201):
                                         r = resp.json() if resp.text else {}
-                                        success = r.get("status") != "error"
-                            elif body:
-                                await wpp.send_message(origin_chat, body, skip_typing=True)
-                                success = True
-                        
+                                        if r.get("status") != "error":
+                                            group_success = True
+                                            success = True
+                                except Exception as e:
+                                    logger.warning(f"ADMIN_BROADCAST: forward error for {target_group[:25]}: {e}")
+
+                            # === FALLBACK: re-send media/text with isForwarded:true ===
+                            if not group_success:
+                                logger.info(f"ADMIN_BROADCAST: fallback resend to {target_group[:25]}")
+                                try:
+                                    if is_media_msg and body:
+                                        media_b64 = body
+                                        if media_b64.startswith("data:"):
+                                            media_b64 = media_b64.split(",", 1)[-1] if "," in media_b64 else media_b64
+                                        mime = mimetype or 'application/octet-stream'
+                                        base64_data = f"data:{mime};base64,{media_b64}"
+                                        is_image = msg_type == 'image' or 'image' in mime
+                                        ep = "send-image" if is_image else "send-file"
+                                        url = f"{wpp.base_url}/api/{wpp.session}/{ep}"
+                                        ext = mime.split('/')[-1].split(';')[0]
+                                        if ext == 'jpeg': ext = 'jpg'
+                                        payload = {
+                                            "phone": target_group,
+                                            "isGroup": "@g.us" in target_group,
+                                            "base64": base64_data,
+                                            "filename": filename or f"media.{ext}",
+                                            "isForwarded": True,
+                                        }
+                                        if caption:
+                                            payload["caption"] = caption
+                                        async with httpx.AsyncClient(timeout=60.0) as client:
+                                            resp = await client.post(url, json=payload, headers=wpp.headers)
+                                        logger.info(f"ADMIN_BROADCAST: {ep} fallback resp: {resp.status_code}")
+                                        if resp.status_code in (200, 201):
+                                            success = True
+                                    elif body:
+                                        await wpp.send_message(target_group, body, skip_typing=True)
+                                        success = True
+                                except Exception as e:
+                                    logger.error(f"ADMIN_BROADCAST: fallback error for {target_group[:25]}: {e}")
+
                         if success:
-                            logger.info("ADMIN_BROADCAST [TEST]: ✅ sent")
-                            await wpp.send_message(origin_chat, "✅ [TESTE] Mensagem encaminhada!", skip_typing=True)
+                            logger.info(f"ADMIN_BROADCAST: ✅ broadcast done to {len(target_groups)} groups")
+                            await wpp.send_message(origin_chat, f"✅ Encaminhado para {len(target_groups)} grupo(s).", skip_typing=True)
                         else:
-                            logger.warning("ADMIN_BROADCAST [TEST]: ❌ failed")
-                            await wpp.send_message(origin_chat, "❌ [TESTE] Falha ao encaminhar.", skip_typing=True)
+                            logger.warning("ADMIN_BROADCAST: ❌ all targets failed")
+                            await wpp.send_message(origin_chat, "❌ Falha ao encaminhar.", skip_typing=True)
                     except Exception as e:
-                        logger.error(f"ADMIN_BROADCAST [TEST]: error: {e}")
-                        await wpp.send_message(origin_chat, f"❌ [TESTE] Erro: {e}", skip_typing=True)
-                
+                        logger.error(f"ADMIN_BROADCAST: error: {e}")
+                        await wpp.send_message(origin_chat, f"❌ Erro: {e}", skip_typing=True)
+
                 background_tasks.add_task(_broadcast_forward, chat_id, q_type, q_body, q_caption,
                                            q_mimetype, q_filename, is_media, q_stanza_id, q_participant, q_id_serialized)
                 log_entry["status"] = "admin_broadcast"
                 _log_webhook(log_entry)
                 return {"status": "admin_broadcast_started"}
+
         
         log_entry["status"] = "group_admin_bypass"
         _log_webhook(log_entry)
