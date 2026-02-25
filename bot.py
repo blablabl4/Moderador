@@ -3558,69 +3558,80 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
             q_filename = quoted_msg.get('filename', '') or ''
             q_stanza_id = msg.get('quotedStanzaID', '') or msg.get('quotedMsgId', '')
             
+            # quotedParticipant = the EXACT JID of who sent the original message (top-level msg field)
+            q_participant = msg.get('quotedParticipant', '') or ''
+            if isinstance(q_participant, dict):
+                q_participant = q_participant.get('_serialized', '') or q_participant.get('id', '')
+            
+            # Try to get the _serialized ID directly from quotedMsg.id
+            q_id_obj = quoted_msg.get('id', {})
+            q_id_serialized = ''
+            if isinstance(q_id_obj, dict):
+                q_id_serialized = q_id_obj.get('_serialized', '')
+            elif isinstance(q_id_obj, str):
+                q_id_serialized = q_id_obj
+            
             is_media = q_type in ('image', 'video', 'audio', 'ptt', 'document', 'sticker')
             has_content = bool((is_media and q_body) or (not is_media and q_body))
             
-            # Log full quotedMsg keys for debugging
-            logger.info(f"ADMIN_BROADCAST: type={q_type}, stanzaId={q_stanza_id[:30] if q_stanza_id else 'none'}, quotedMsg_keys={list(quoted_msg.keys())}")
-            logger.info(f"ADMIN_BROADCAST: quotedMsg.author={quoted_msg.get('author','')}, quotedMsg.from={quoted_msg.get('from','')}, quotedMsg.sender={quoted_msg.get('sender','')}")
+            # Log all quoted* fields from the top-level msg for diagnostics
+            quoted_fields = {k: str(v)[:60] for k, v in msg.items() if 'quot' in k.lower()}
+            logger.info(f"ADMIN_BROADCAST: type={q_type}, stanzaId={q_stanza_id[:30] if q_stanza_id else 'none'}, participant={q_participant[:30] if q_participant else 'none'}, id_serialized={q_id_serialized[:60] if q_id_serialized else 'none'}")
+            logger.info(f"ADMIN_BROADCAST: all_quoted_fields={quoted_fields}")
             
-            if has_content or q_stanza_id:
+            if has_content or q_stanza_id or q_id_serialized:
                 async def _broadcast_forward(origin_chat: str, msg_type: str, body: str, caption: str,
                                               mimetype: str, filename: str, is_media_msg: bool,
-                                              stanza_id: str):
+                                              stanza_id: str, participant: str, id_serialized: str):
                     try:
                         await ensure_token()
                         # --- TEST MODE: send only to the same group ---
                         success = False
                         
-                        # === STRATEGY 1: Find the exact message ID from WPP's message history ===
-                        # This gives us the correct _serialized WID that WPP actually stores
-                        correct_serialized_id = None
-                        if stanza_id:
+                        # Build candidate IDs for forward-messages
+                        # Priority: 1) id directly from webhook quotedMsg.id._serialized
+                        #           2) false_{quotedParticipant}_{stanzaId} (correct WPP WID)
+                        #           3) Chat history lookup
+                        candidate_ids = []
+                        if id_serialized:
+                            candidate_ids.append(id_serialized)
+                        if stanza_id and participant:
+                            candidate_ids.append(f"false_{participant}_{stanza_id}")
+                            candidate_ids.append(f"true_{participant}_{stanza_id}")
+                        if stanza_id and not participant:
+                            # Try chat history to get exact ID
                             try:
                                 messages = await wpp.get_messages(origin_chat, count=50)
                                 for m in messages:
                                     m_id = m.get('id', {})
-                                    m_stanza = ''
                                     if isinstance(m_id, dict):
-                                        m_stanza = m_id.get('id', '') or m_id.get('_serialized', '')
-                                        # Extract stanza part from _serialized (format: false_CHAT_STANZA)
                                         ser = m_id.get('_serialized', '')
                                         if ser:
                                             parts = ser.split('_', 2)
                                             if len(parts) == 3 and parts[2] == stanza_id:
-                                                correct_serialized_id = ser
+                                                candidate_ids.insert(0, ser)
                                                 break
-                                    elif isinstance(m_id, str):
-                                        m_stanza = m_id
-                                    if m_stanza == stanza_id or (m_stanza and m_stanza.endswith(f'_{stanza_id}')):
-                                        if isinstance(m_id, dict) and m_id.get('_serialized'):
-                                            correct_serialized_id = m_id['_serialized']
-                                            break
-                                if correct_serialized_id:
-                                    logger.info(f"ADMIN_BROADCAST: ✅ Found message in history: {correct_serialized_id[:60]}")
-                                else:
-                                    logger.info(f"ADMIN_BROADCAST: ❌ Message not found in history (stanza={stanza_id[:30]}), tried {len(messages)} msgs")
                             except Exception as e:
                                 logger.warning(f"ADMIN_BROADCAST: get_messages error: {e}")
                         
-                        # Try forward-messages with the exact serialized ID
-                        if correct_serialized_id:
-                            fwd_url = f"{wpp.base_url}/api/{wpp.session}/forward-messages"
-                            async with httpx.AsyncClient(timeout=30.0) as client:
+                        logger.info(f"ADMIN_BROADCAST: Trying forward with candidates={[c[:50] for c in candidate_ids]}")
+                        
+                        fwd_url = f"{wpp.base_url}/api/{wpp.session}/forward-messages"
+                        async with httpx.AsyncClient(timeout=30.0) as client:
+                            for cid in candidate_ids:
                                 payload = {
                                     "phone": origin_chat,
-                                    "messageId": correct_serialized_id,
+                                    "messageId": cid,
                                     "isGroup": True,
                                 }
                                 resp = await client.post(fwd_url, json=payload, headers=wpp.headers)
-                                logger.info(f"ADMIN_BROADCAST: forward-messages resp: {resp.status_code} - {resp.text[:300]}")
+                                logger.info(f"ADMIN_BROADCAST: forward-messages id={cid[:50]}, resp:{resp.status_code} - {resp.text[:200]}")
                                 if resp.status_code in (200, 201):
                                     r = resp.json() if resp.text else {}
                                     if r.get("status") != "error":
                                         success = True
-                                        logger.info("ADMIN_BROADCAST: ✅ Forwarded successfully!")
+                                        logger.info(f"ADMIN_BROADCAST: ✅ Forwarded! id={cid[:40]}")
+                                        break
                         
                         # === STRATEGY 2: re-send with isForwarded:true (fallback) ===
                         if not success:
@@ -3666,7 +3677,7 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
                         await wpp.send_message(origin_chat, f"❌ [TESTE] Erro: {e}", skip_typing=True)
                 
                 background_tasks.add_task(_broadcast_forward, chat_id, q_type, q_body, q_caption,
-                                           q_mimetype, q_filename, is_media, q_stanza_id)
+                                           q_mimetype, q_filename, is_media, q_stanza_id, q_participant, q_id_serialized)
                 log_entry["status"] = "admin_broadcast"
                 _log_webhook(log_entry)
                 return {"status": "admin_broadcast_started"}
