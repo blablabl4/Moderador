@@ -176,20 +176,38 @@ class WPPConnectClient:
 
     async def forward_messages(self, to_chat_id: str, message_id: str):
         """Forward a message to another chat/group.
-        Uses WPPConnect's forward-messages endpoint.
+        Tries multiple WPPConnect API approaches.
         """
         is_group = '@g.us' in to_chat_id
-        url = f"{self.base_url}/api/{self.session}/forward-messages"
-        payload = {"phone": to_chat_id, "messageId": message_id, "isGroup": is_group}
-        logger.info(f"FORWARD_MSG: to={to_chat_id[:30]}, msgId={str(message_id)[:40]}")
+        logger.info(f"FORWARD_MSG: to={to_chat_id[:30]}, msgId={str(message_id)[:50]}")
+        
         async with httpx.AsyncClient(timeout=30.0) as client:
+            # Approach 1: forward-messages endpoint
+            url = f"{self.base_url}/api/{self.session}/forward-messages"
+            payload = {"phone": to_chat_id, "messageId": message_id, "isGroup": is_group}
             try:
                 resp = await client.post(url, json=payload, headers=self.headers)
-                logger.info(f"FORWARD_MSG resp: {resp.status_code} - {resp.text[:300]}")
-                return resp.status_code in (200, 201)
+                logger.info(f"FORWARD_MSG [forward-messages] resp: {resp.status_code} - {resp.text[:500]}")
+                if resp.status_code in (200, 201):
+                    body = resp.json() if resp.text else {}
+                    if body.get("status") != "error":
+                        return True
             except Exception as e:
-                logger.error(f"FORWARD_MSG error: {e}")
-                return False
+                logger.error(f"FORWARD_MSG [forward-messages] error: {e}")
+            
+            # Approach 2: try with messageId as array
+            try:
+                payload2 = {"phone": to_chat_id, "messageId": [message_id], "isGroup": is_group}
+                resp2 = await client.post(url, json=payload2, headers=self.headers)
+                logger.info(f"FORWARD_MSG [array] resp: {resp2.status_code} - {resp2.text[:500]}")
+                if resp2.status_code in (200, 201):
+                    body = resp2.json() if resp2.text else {}
+                    if body.get("status") != "error":
+                        return True
+            except Exception as e:
+                logger.error(f"FORWARD_MSG [array] error: {e}")
+        
+        return False
 
     async def delete_message(self, phone: str, message_id: str):
         is_group = '@g.us' in phone
@@ -3504,6 +3522,12 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
         quoted_msg = msg.get('quotedMsg') or msg.get('quotedMsgObj') or {}
         quoted_msg_id = None
         if quoted_msg:
+            # Debug: log the raw quoted message structure to find the right ID field
+            qkeys = list(quoted_msg.keys()) if isinstance(quoted_msg, dict) else str(type(quoted_msg))
+            qid_raw = quoted_msg.get('id', '') if isinstance(quoted_msg, dict) else ''
+            logger.info(f"ADMIN_BROADCAST DEBUG: quotedMsg keys={qkeys}, id_raw={qid_raw}, type(id)={type(qid_raw)}")
+            logger.info(f"ADMIN_BROADCAST DEBUG: msg.quotedMsgId={msg.get('quotedMsgId','')}, msg.quotedStanzaID={msg.get('quotedStanzaID','')}")
+            
             qid = quoted_msg.get('id', '') or msg.get('quotedMsgId', '') or msg.get('quotedStanzaID', '')
             if isinstance(qid, dict):
                 quoted_msg_id = qid.get('_serialized', '')
@@ -3517,13 +3541,14 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
                 try:
                     await ensure_token()
                     # --- TEST MODE: forward only to the same group ---
+                    logger.info(f"ADMIN_BROADCAST [TEST]: Attempting forward. chat={origin_chat}, msgId={fwd_msg_id}")
                     success = await wpp.forward_messages(origin_chat, fwd_msg_id)
                     if success:
                         logger.info(f"ADMIN_BROADCAST [TEST]: ✅ forwarded to same group")
                         await wpp.send_message(origin_chat, "✅ [TESTE] Mensagem replicada com sucesso! (modo teste: só neste grupo)", skip_typing=True)
                     else:
                         logger.warning(f"ADMIN_BROADCAST [TEST]: ❌ forward failed")
-                        await wpp.send_message(origin_chat, "❌ [TESTE] Falha ao replicar mensagem.", skip_typing=True)
+                        await wpp.send_message(origin_chat, f"❌ [TESTE] Falha ao replicar. msgId={fwd_msg_id[:30]}", skip_typing=True)
                 except Exception as e:
                     logger.error(f"ADMIN_BROADCAST [TEST]: error: {e}")
                     await wpp.send_message(origin_chat, f"❌ [TESTE] Erro: {e}", skip_typing=True)
