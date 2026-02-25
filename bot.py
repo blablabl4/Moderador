@@ -3442,72 +3442,6 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
     
     logger.info(f"MSG: sender={sender_id[:25]}, group={is_group}, chat={chat_id[:25]}, type={msg_type}, admin={is_admin}")
     
-    # --- ADMIN REPLY BROADCAST: forward replied-to message to all other groups ---
-    if is_admin and is_group:
-        # Check if this message is a reply (quoted message)
-        quoted_msg = msg.get('quotedMsg') or msg.get('quotedMsgObj') or {}
-        quoted_msg_id = None
-        if quoted_msg:
-            # Get the ID of the quoted message
-            qid = quoted_msg.get('id', '') or msg.get('quotedMsgId', '') or msg.get('quotedStanzaID', '')
-            if isinstance(qid, dict):
-                quoted_msg_id = qid.get('_serialized', '')
-            elif isinstance(qid, str) and qid:
-                quoted_msg_id = qid
-        
-        if quoted_msg_id:
-            logger.info(f"ADMIN_BROADCAST: Admin replied in {chat_id[:25]}, forwarding quoted msg {str(quoted_msg_id)[:40]} to all other groups")
-            
-            async def _broadcast_forward(origin_chat: str, fwd_msg_id: str):
-                try:
-                    await ensure_token()
-                    all_groups_raw = await wpp.get_all_groups()
-                    if not all_groups_raw:
-                        logger.warning("ADMIN_BROADCAST: no groups found")
-                        return
-                    
-                    forwarded = 0
-                    failed = 0
-                    for g in all_groups_raw:
-                        if isinstance(g, dict):
-                            gid = g.get('id', g.get('_serialized', ''))
-                            if isinstance(gid, dict):
-                                gid = gid.get('_serialized', '')
-                        elif isinstance(g, str):
-                            gid = g
-                        else:
-                            continue
-                        
-                        # Skip the origin group
-                        if not gid or str(gid) == origin_chat:
-                            continue
-                        
-                        # Only forward to group chats
-                        if '@g.us' not in str(gid):
-                            continue
-                        
-                        try:
-                            await asyncio.sleep(random.uniform(1.0, 3.0))  # Anti-spam delay
-                            success = await wpp.forward_messages(str(gid), fwd_msg_id)
-                            if success:
-                                forwarded += 1
-                            else:
-                                failed += 1
-                        except Exception as e:
-                            failed += 1
-                            logger.error(f"ADMIN_BROADCAST: error forwarding to {str(gid)[:25]}: {e}")
-                    
-                    logger.info(f"ADMIN_BROADCAST: DONE. Forwarded to {forwarded} groups, failed={failed}")
-                    # Confirm to admin in origin group
-                    await wpp.send_message(origin_chat, f"✅ Mensagem replicada para {forwarded} grupo(s).", skip_typing=True)
-                except Exception as e:
-                    logger.error(f"ADMIN_BROADCAST: error: {e}")
-            
-            background_tasks.add_task(_broadcast_forward, chat_id, quoted_msg_id)
-            log_entry["status"] = "admin_broadcast"
-            _log_webhook(log_entry)
-            return {"status": "admin_broadcast_started"}
-    
     # 0. Command: !regras (Available to everyone)
     if body.strip().lower() in ("!regras", "/regras"):
         regras_msg = (
@@ -3566,6 +3500,65 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
     log_entry["group_admin_ids_sample"] = list(group_admin_ids)[:5]
     
     if is_group_admin:
+        # --- ADMIN REPLY BROADCAST: forward replied-to message to all other groups ---
+        quoted_msg = msg.get('quotedMsg') or msg.get('quotedMsgObj') or {}
+        quoted_msg_id = None
+        if quoted_msg:
+            qid = quoted_msg.get('id', '') or msg.get('quotedMsgId', '') or msg.get('quotedStanzaID', '')
+            if isinstance(qid, dict):
+                quoted_msg_id = qid.get('_serialized', '')
+            elif isinstance(qid, str) and qid:
+                quoted_msg_id = qid
+        
+        if quoted_msg_id:
+            logger.info(f"ADMIN_BROADCAST: Group admin replied in {chat_id[:25]}, forwarding quoted msg {str(quoted_msg_id)[:40]}")
+            
+            async def _broadcast_forward(origin_chat: str, fwd_msg_id: str):
+                try:
+                    await ensure_token()
+                    all_groups_raw = await wpp.get_all_groups()
+                    if not all_groups_raw:
+                        logger.warning("ADMIN_BROADCAST: no groups found")
+                        return
+                    
+                    forwarded = 0
+                    failed = 0
+                    for g in all_groups_raw:
+                        if isinstance(g, dict):
+                            gid = g.get('id', g.get('_serialized', ''))
+                            if isinstance(gid, dict):
+                                gid = gid.get('_serialized', '')
+                        elif isinstance(g, str):
+                            gid = g
+                        else:
+                            continue
+                        
+                        if not gid or str(gid) == origin_chat:
+                            continue
+                        if '@g.us' not in str(gid):
+                            continue
+                        
+                        try:
+                            await asyncio.sleep(random.uniform(1.0, 3.0))
+                            success = await wpp.forward_messages(str(gid), fwd_msg_id)
+                            if success:
+                                forwarded += 1
+                            else:
+                                failed += 1
+                        except Exception as e:
+                            failed += 1
+                            logger.error(f"ADMIN_BROADCAST: error forwarding to {str(gid)[:25]}: {e}")
+                    
+                    logger.info(f"ADMIN_BROADCAST: DONE. Forwarded to {forwarded} groups, failed={failed}")
+                    await wpp.send_message(origin_chat, f"\u2705 Mensagem replicada para {forwarded} grupo(s).", skip_typing=True)
+                except Exception as e:
+                    logger.error(f"ADMIN_BROADCAST: error: {e}")
+            
+            background_tasks.add_task(_broadcast_forward, chat_id, quoted_msg_id)
+            log_entry["status"] = "admin_broadcast"
+            _log_webhook(log_entry)
+            return {"status": "admin_broadcast_started"}
+        
         log_entry["status"] = "group_admin_bypass"
         _log_webhook(log_entry)
         return {"status": "group_admin_bypass"}
