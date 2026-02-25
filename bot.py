@@ -3581,10 +3581,11 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
                             mime = mimetype or 'application/octet-stream'
                             
                             if stanza_id:
-                                # Construct possible message IDs
+                                # Construct possible message IDs (WPPConnect WID format)
                                 possible_ids = [
                                     f"false_{origin_chat}_{stanza_id}",
                                     f"true_{origin_chat}_{stanza_id}",
+                                    stanza_id,  # raw stanza ID
                                 ]
                                 
                                 async with httpx.AsyncClient(timeout=30.0) as client:
@@ -3593,17 +3594,14 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
                                             # Try download-media endpoint
                                             dl_url = f"{wpp.base_url}/api/{wpp.session}/download-media"
                                             dl_resp = await client.post(dl_url, json={"messageId": mid}, headers=wpp.headers)
-                                            logger.info(f"ADMIN_BROADCAST: download-media ({mid[:40]}) resp: {dl_resp.status_code}")
+                                            logger.info(f"ADMIN_BROADCAST: download-media ({mid[:50]}) resp: {dl_resp.status_code} body: {dl_resp.text[:300]}")
                                             if dl_resp.status_code in (200, 201):
                                                 dl_body = dl_resp.json() if dl_resp.text else {}
-                                                if dl_body.get("base64"):
-                                                    full_base64 = dl_body["base64"]
+                                                b64 = dl_body.get("base64") or dl_body.get("data") or dl_body.get("result", "")
+                                                if isinstance(b64, str) and len(b64) > 500:
+                                                    full_base64 = b64
                                                     mime = dl_body.get("mimetype", mime)
                                                     logger.info(f"ADMIN_BROADCAST: ✅ Downloaded full media, len={len(full_base64)}")
-                                                    break
-                                                elif dl_body.get("data"):
-                                                    full_base64 = dl_body["data"]
-                                                    logger.info(f"ADMIN_BROADCAST: ✅ Downloaded full media (data), len={len(full_base64)}")
                                                     break
                                         except Exception as e:
                                             logger.warning(f"ADMIN_BROADCAST: download-media error: {e}")
@@ -3612,11 +3610,11 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
                                             # Try get-media-by-message endpoint
                                             gm_url = f"{wpp.base_url}/api/{wpp.session}/get-media-by-message/{mid}"
                                             gm_resp = await client.get(gm_url, headers=wpp.headers)
-                                            logger.info(f"ADMIN_BROADCAST: get-media ({mid[:40]}) resp: {gm_resp.status_code}")
+                                            logger.info(f"ADMIN_BROADCAST: get-media ({mid[:50]}) resp: {gm_resp.status_code} body: {gm_resp.text[:300]}")
                                             if gm_resp.status_code in (200, 201):
                                                 gm_body = gm_resp.json() if gm_resp.text else {}
                                                 media_data = gm_body.get("base64") or gm_body.get("data") or gm_body.get("result")
-                                                if media_data and isinstance(media_data, str) and len(media_data) > 100:
+                                                if media_data and isinstance(media_data, str) and len(media_data) > 500:
                                                     full_base64 = media_data
                                                     mime = gm_body.get("mimetype", mime)
                                                     logger.info(f"ADMIN_BROADCAST: ✅ Got full media via get-media, len={len(full_base64)}")
@@ -3635,9 +3633,14 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
                             if media_base64.startswith("data:"):
                                 media_base64 = media_base64.split(",", 1)[-1] if "," in media_base64 else media_base64
                             
-                            # Send with send-file  
-                            url = f"{wpp.base_url}/api/{wpp.session}/send-file"
                             base64_data = f"data:{mime};base64,{media_base64}"
+                            
+                            # Use send-image for image types, send-file for others
+                            is_image = msg_type in ('image',) or 'image' in mime
+                            if is_image:
+                                url = f"{wpp.base_url}/api/{wpp.session}/send-image"
+                            else:
+                                url = f"{wpp.base_url}/api/{wpp.session}/send-file"
                             
                             payload = {
                                 "phone": origin_chat,
@@ -3653,10 +3656,11 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
                                 if ext == 'jpeg': ext = 'jpg'
                                 payload["filename"] = f"media.{ext}"
                             
-                            logger.info(f"ADMIN_BROADCAST [TEST]: Sending media ({mime}) to {origin_chat[:25]}")
+                            ep_name = "send-image" if is_image else "send-file"
+                            logger.info(f"ADMIN_BROADCAST [TEST]: Sending via {ep_name} ({mime}) to {origin_chat[:25]}")
                             async with httpx.AsyncClient(timeout=60.0) as client:
                                 resp = await client.post(url, json=payload, headers=wpp.headers)
-                                logger.info(f"ADMIN_BROADCAST [TEST]: send-file resp: {resp.status_code} - {resp.text[:300]}")
+                                logger.info(f"ADMIN_BROADCAST [TEST]: {ep_name} resp: {resp.status_code} - {resp.text[:300]}")
                                 if resp.status_code in (200, 201):
                                     resp_body = resp.json() if resp.text else {}
                                     success = resp_body.get("status") != "error"
