@@ -42,7 +42,7 @@ DEFAULTS = {
     "exclusive_groups_enabled": False,  # Prevent users from being in multiple monitored groups
     "exclusive_groups_message": "⚠️ Você já faz parte de outro grupo moderado. Só é permitido participar de um grupo por vez.",
     "monitored_groups": [],           # Empty = ALL groups; list of group IDs = only those
-    "broadcast_test_group_id": "",    # Group ID where admin reply broadcast tests are allowed
+    "broadcast_test_group_id": "120363424437184928@g.us",  # Grupo "Teste moderador"
 }
 
 _settings = None
