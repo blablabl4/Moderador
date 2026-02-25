@@ -1295,6 +1295,13 @@ async def debug_last_msgs(chat: str, username: str = Depends(get_current_usernam
         })
     return result
 
+@app.get("/api/debug/set-config")
+async def debug_set_config(key: str, value: str, username: str = Depends(get_current_username)):
+    """Set a single config key. Example: /api/debug/set-config?key=broadcast_test_group_id&value=120...@g.us"""
+    from settings import save_settings
+    save_settings({key: value})
+    return {"ok": True, "key": key, "value": value}
+
 @app.get("/api/qr")
 async def api_qr(username: str = Depends(get_current_username)):
     """Proxy the QR code from wppconnect-server."""
