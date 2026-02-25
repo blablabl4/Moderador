@@ -3518,45 +3518,72 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
     log_entry["group_admin_ids_sample"] = list(group_admin_ids)[:5]
     
     if is_group_admin:
-        # --- ADMIN REPLY BROADCAST: forward replied-to message to all other groups ---
+        # --- ADMIN REPLY BROADCAST: re-send quoted message to all other groups ---
         quoted_msg = msg.get('quotedMsg') or msg.get('quotedMsgObj') or {}
-        quoted_msg_id = None
-        if quoted_msg:
-            # Debug: log the raw quoted message structure to find the right ID field
-            qkeys = list(quoted_msg.keys()) if isinstance(quoted_msg, dict) else str(type(quoted_msg))
-            qid_raw = quoted_msg.get('id', '') if isinstance(quoted_msg, dict) else ''
-            logger.info(f"ADMIN_BROADCAST DEBUG: quotedMsg keys={qkeys}, id_raw={qid_raw}, type(id)={type(qid_raw)}")
-            logger.info(f"ADMIN_BROADCAST DEBUG: msg.quotedMsgId={msg.get('quotedMsgId','')}, msg.quotedStanzaID={msg.get('quotedStanzaID','')}")
-            
-            qid = quoted_msg.get('id', '') or msg.get('quotedMsgId', '') or msg.get('quotedStanzaID', '')
-            if isinstance(qid, dict):
-                quoted_msg_id = qid.get('_serialized', '')
-            elif isinstance(qid, str) and qid:
-                quoted_msg_id = qid
         
-        if quoted_msg_id:
-            logger.info(f"ADMIN_BROADCAST: Group admin replied in {chat_id[:25]}, forwarding quoted msg {str(quoted_msg_id)[:40]}")
+        if quoted_msg and isinstance(quoted_msg, dict):
+            # Extract content from the quoted message
+            q_type = quoted_msg.get('type', 'chat')
+            q_body = quoted_msg.get('body', '') or ''
+            q_caption = quoted_msg.get('caption', '') or ''
+            q_media_url = quoted_msg.get('mediaUrl', '') or ''
+            q_mimetype = quoted_msg.get('mimetype', '') or ''
+            q_filename = quoted_msg.get('filename', '') or ''
             
-            async def _broadcast_forward(origin_chat: str, fwd_msg_id: str):
-                try:
-                    await ensure_token()
-                    # --- TEST MODE: forward only to the same group ---
-                    logger.info(f"ADMIN_BROADCAST [TEST]: Attempting forward. chat={origin_chat}, msgId={fwd_msg_id}")
-                    success = await wpp.forward_messages(origin_chat, fwd_msg_id)
-                    if success:
-                        logger.info(f"ADMIN_BROADCAST [TEST]: ✅ forwarded to same group")
-                        await wpp.send_message(origin_chat, "✅ [TESTE] Mensagem replicada com sucesso! (modo teste: só neste grupo)", skip_typing=True)
-                    else:
-                        logger.warning(f"ADMIN_BROADCAST [TEST]: ❌ forward failed")
-                        await wpp.send_message(origin_chat, f"❌ [TESTE] Falha ao replicar. msgId={fwd_msg_id[:30]}", skip_typing=True)
-                except Exception as e:
-                    logger.error(f"ADMIN_BROADCAST [TEST]: error: {e}")
-                    await wpp.send_message(origin_chat, f"❌ [TESTE] Erro: {e}", skip_typing=True)
+            # The text to send: caption for media, body for text messages
+            text_content = q_caption or q_body or ''
             
-            background_tasks.add_task(_broadcast_forward, chat_id, quoted_msg_id)
-            log_entry["status"] = "admin_broadcast"
-            _log_webhook(log_entry)
-            return {"status": "admin_broadcast_started"}
+            # Check if it's a media message
+            is_media = q_type in ('image', 'video', 'audio', 'ptt', 'document', 'sticker') or q_media_url
+            
+            logger.info(f"ADMIN_BROADCAST: Admin replied in {chat_id[:25]}, type={q_type}, has_media={is_media}, has_text={bool(text_content)}, mediaUrl={q_media_url[:50] if q_media_url else 'none'}")
+            
+            # Only broadcast if there's actual content
+            if text_content or is_media:
+                async def _broadcast_resend(origin_chat: str, content: str, media_url: str, media_type: str, mime: str, fname: str):
+                    try:
+                        await ensure_token()
+                        # --- TEST MODE: send only to the same group ---
+                        success = False
+                        
+                        if media_url:
+                            # Send media via send-file-from-url
+                            url = f"{wpp.base_url}/api/{wpp.session}/send-file-from-url"
+                            payload = {
+                                "phone": origin_chat,
+                                "url": media_url,
+                                "isGroup": True,
+                            }
+                            if content:
+                                payload["caption"] = content
+                            if fname:
+                                payload["filename"] = fname
+                            
+                            logger.info(f"ADMIN_BROADCAST [TEST]: Sending media to {origin_chat[:25]}, url={media_url[:60]}")
+                            async with httpx.AsyncClient(timeout=30.0) as client:
+                                resp = await client.post(url, json=payload, headers=wpp.headers)
+                                logger.info(f"ADMIN_BROADCAST [TEST]: send-file resp: {resp.status_code} - {resp.text[:300]}")
+                                success = resp.status_code in (200, 201)
+                        elif content:
+                            # Send text message
+                            logger.info(f"ADMIN_BROADCAST [TEST]: Sending text to {origin_chat[:25]}, len={len(content)}")
+                            result = await wpp.send_message(origin_chat, content, skip_typing=True)
+                            success = "200" in str(result)
+                        
+                        if success:
+                            logger.info(f"ADMIN_BROADCAST [TEST]: ✅ sent to same group")
+                            await wpp.send_message(origin_chat, "✅ [TESTE] Mensagem replicada com sucesso! (modo teste: só neste grupo)", skip_typing=True)
+                        else:
+                            logger.warning(f"ADMIN_BROADCAST [TEST]: ❌ send failed")
+                            await wpp.send_message(origin_chat, "❌ [TESTE] Falha ao replicar mensagem.", skip_typing=True)
+                    except Exception as e:
+                        logger.error(f"ADMIN_BROADCAST [TEST]: error: {e}")
+                        await wpp.send_message(origin_chat, f"❌ [TESTE] Erro: {e}", skip_typing=True)
+                
+                background_tasks.add_task(_broadcast_resend, chat_id, text_content, q_media_url, q_type, q_mimetype, q_filename)
+                log_entry["status"] = "admin_broadcast"
+                _log_webhook(log_entry)
+                return {"status": "admin_broadcast_started"}
         
         log_entry["status"] = "group_admin_bypass"
         _log_webhook(log_entry)
