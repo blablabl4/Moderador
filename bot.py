@@ -524,12 +524,12 @@ class WPPConnectClient:
 
     async def send_reaction(self, msg_id: str, chat_id: str, emoji: str) -> bool:
         """React to a message with an emoji."""
-        url = f"{self.base_url}/api/{self.session}/send-reaction"
-        payload = {"msgId": msg_id, "toPhone": chat_id, "reaction": emoji}
+        url = f"{self.base_url}/api/{self.session}/react-message"
+        payload = {"msgId": msg_id, "reaction": emoji}
         async with httpx.AsyncClient(timeout=15) as client:
             try:
                 resp = await client.post(url, json=payload, headers=self.headers)
-                logger.info(f"REACTION: {emoji} on {str(msg_id)[:30]}: {resp.status_code}")
+                logger.info(f"REACTION: {emoji} on {str(msg_id)[:30]}: {resp.status_code} - {resp.text[:100]}")
                 return resp.status_code in (200, 201)
             except Exception as e:
                 logger.warning(f"send_reaction error: {e}")
