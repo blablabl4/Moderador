@@ -1023,6 +1023,51 @@ async def job_exclusive_cleanup(force=False, group_ids: list = None):
 
 
 # --- FASTAPI APP & LIFESPAN ---
+# Track which messages have already been processed by phone scan to avoid re-processing
+_phone_scan_processed: set = set()
+_PHONE_SCAN_MAX_CACHE = 500  # Limit cache size
+
+async def job_phone_scan():
+    """Periodic scan of phone_required_groups — react to valid ads, delete invalid ones."""
+    global _phone_scan_processed
+    phone_groups = cfg.get("phone_required_groups", [])
+    if not phone_groups:
+        return
+    approved_emoji = cfg.get("phone_approved_emoji", "🔁")
+    await ensure_token()
+    for group_id in phone_groups:
+        try:
+            messages = await wpp.get_messages(group_id, count=50)
+            if not messages:
+                continue
+            for m in messages:
+                m_id_obj = m.get('id', {})
+                if isinstance(m_id_obj, dict):
+                    msg_id = m_id_obj.get('_serialized', '') or m_id_obj.get('id', '')
+                    from_me = m_id_obj.get('fromMe', False)
+                else:
+                    msg_id = str(m_id_obj)
+                    from_me = False
+                if not msg_id or from_me or msg_id in _phone_scan_processed:
+                    continue
+                msg_type = m.get('type', '')
+                if msg_type not in ('image', 'video'):
+                    continue
+                caption = m.get('caption', '') or ''
+                _phone_scan_processed.add(msg_id)
+                # Trim cache
+                if len(_phone_scan_processed) > _PHONE_SCAN_MAX_CACHE:
+                    _phone_scan_processed = set(list(_phone_scan_processed)[-_PHONE_SCAN_MAX_CACHE:])
+                if has_phone_number(caption):
+                    await wpp.send_reaction(msg_id, group_id, approved_emoji)
+                    logger.info(f"PHONE_SCAN: reacted {approved_emoji} on {msg_id[:40]}")
+                else:
+                    logger.info(f"PHONE_SCAN: deleting missing-phone msg {msg_id[:40]}")
+                    await wpp.delete_message(group_id, msg_id)
+                await asyncio.sleep(1)  # Small delay between actions
+        except Exception as e:
+            logger.warning(f"job_phone_scan error for {group_id[:25]}: {e}")
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Bot starting up...")
@@ -1060,6 +1105,7 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(job_close_groups, 'cron', hour=20, minute=0)
     scheduler.add_job(job_watchdog, 'interval', minutes=5, id='watchdog')
     scheduler.add_job(job_sync_invite_links, 'interval', minutes=10, id='sync_invite_links')
+    scheduler.add_job(job_phone_scan, 'interval', minutes=5, id='phone_scan')
     scheduler.start()
     logger.info("Scheduler started: watchdog(5m), invite_sync(10m). exclusive_cleanup=MANUAL_ONLY")
     
