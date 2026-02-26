@@ -3065,6 +3065,14 @@ def _log_webhook(entry):
 _warn_cooldown = {}  # key=(sender_id, group_id) -> last_warn_time
 _WARN_COOLDOWN_SECONDS = 60
 
+def has_phone_number(text: str) -> bool:
+    """Check if text contains a Brazilian phone number (8-11 digits)."""
+    if not text:
+        return False
+    # Matches formats: 98879-3966, 95701-4008, (11)98879-3966, +55 11 98879-3966, etc.
+    pattern = r'(?:\+?55[\s\-]?)?(?:\(?\d{2}\)?[\s\-]?)?\d{4,5}[\s\-]?\d{4}'
+    return bool(re.search(pattern, text))
+
 async def enforce_action(action: str, group_id: str, msg_id: str, warn_text: str, sender_id: str = "") -> dict:
     """Execute moderation action: delete, delete_warn, or warn. Returns result dict.
     Warnings are debounced per sender+group to avoid flooding the group."""
@@ -3789,7 +3797,22 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
         _log_webhook(log_entry)
         return {"status": "link_violation"}
 
-    # 6. Flood Control (locked per user to prevent race with grouped images)
+    # 6b. PHONE NUMBER FILTER — Media ads must contain phone number in caption
+    phone_required = cfg.get("phone_required_groups", [])
+    if group_id in phone_required and msg_type in ('image', 'video'):
+        text_to_check = caption or body
+        # For media, body is base64 — use caption only
+        if msg_type in ('image', 'video'):
+            text_to_check = caption
+        if not has_phone_number(text_to_check):
+            logger.info(f"PHONE_MISSING: {sender_id[:20]} in {group_id[:20]}, caption={str(text_to_check)[:50]}")
+            enforce_result = await enforce_action("delete", group_id, msg_id, "", sender_id=sender_id)
+            log_entry["status"] = "phone_missing"
+            log_entry["enforce_result"] = enforce_result
+            _log_webhook(log_entry)
+            return {"status": "phone_missing"}
+
+    # 6c. Flood Control (locked per user to prevent race with grouped images)
     has_media = msg_type in ('image', 'video', 'document', 'sticker')
     # IMPORTANT: For media messages, body contains base64 data (huge), use caption only
     if has_media:

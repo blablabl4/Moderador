@@ -43,6 +43,7 @@ DEFAULTS = {
     "exclusive_groups_message": "⚠️ Você já faz parte de outro grupo moderado. Só é permitido participar de um grupo por vez.",
     "monitored_groups": [],           # Empty = ALL groups; list of group IDs = only those
     "broadcast_test_group_id": "120363424437184928@g.us",  # Grupo "Teste moderador"
+    "phone_required_groups": ["120363406870144681@g.us"],  # Groups where ads must have phone number
 }
 
 _settings = None
