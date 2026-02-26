@@ -522,6 +522,19 @@ class WPPConnectClient:
                 logger.error(f"Error getting messages for {chat_id}: {e}")
                 return []
 
+    async def send_reaction(self, msg_id: str, chat_id: str, emoji: str) -> bool:
+        """React to a message with an emoji."""
+        url = f"{self.base_url}/api/{self.session}/send-reaction"
+        payload = {"msgId": msg_id, "toPhone": chat_id, "reaction": emoji}
+        async with httpx.AsyncClient(timeout=15) as client:
+            try:
+                resp = await client.post(url, json=payload, headers=self.headers)
+                logger.info(f"REACTION: {emoji} on {str(msg_id)[:30]}: {resp.status_code}")
+                return resp.status_code in (200, 201)
+            except Exception as e:
+                logger.warning(f"send_reaction error: {e}")
+                return False
+
 wpp = WPPConnectClient(WPP_SERVER_URL, SESSION_NAME, WPP_SECRET_KEY)
 
 # --- SCHEDULER TASKS & WATCHDOG ---
@@ -3800,10 +3813,8 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
     # 6b. PHONE NUMBER FILTER — Media ads must contain phone number in caption
     phone_required = cfg.get("phone_required_groups", [])
     if group_id in phone_required and msg_type in ('image', 'video'):
-        text_to_check = caption or body
-        # For media, body is base64 — use caption only
-        if msg_type in ('image', 'video'):
-            text_to_check = caption
+        # For media messages body is base64 — only check caption
+        text_to_check = caption
         if not has_phone_number(text_to_check):
             logger.info(f"PHONE_MISSING: {sender_id[:20]} in {group_id[:20]}, caption={str(text_to_check)[:50]}")
             enforce_result = await enforce_action("delete", group_id, msg_id, "", sender_id=sender_id)
@@ -3811,6 +3822,11 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
             log_entry["enforce_result"] = enforce_result
             _log_webhook(log_entry)
             return {"status": "phone_missing"}
+        else:
+            # Message is valid — react with ✅
+            approved_emoji = cfg.get("phone_approved_emoji", "✅")
+            background_tasks.add_task(wpp.send_reaction, msg_id, group_id, approved_emoji)
+            logger.info(f"PHONE_OK: reacted {approved_emoji} on {str(msg_id)[:30]}")
 
     # 6c. Flood Control (locked per user to prevent race with grouped images)
     has_media = msg_type in ('image', 'video', 'document', 'sticker')
