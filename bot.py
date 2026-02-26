@@ -3824,7 +3824,7 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
             return {"status": "phone_missing"}
         else:
             # Message is valid — react with ✅
-            approved_emoji = cfg.get("phone_approved_emoji", "✅")
+            approved_emoji = cfg.get("phone_approved_emoji", "🔁")
             background_tasks.add_task(wpp.send_reaction, msg_id, group_id, approved_emoji)
             logger.info(f"PHONE_OK: reacted {approved_emoji} on {str(msg_id)[:30]}")
 
