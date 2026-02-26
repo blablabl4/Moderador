@@ -3837,7 +3837,14 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
         return {"status": "sticker_blocked"}
     
     # 5b. STATUS SHARE FILTER — Block shared WhatsApp status updates
-    if msg_type == 'status' or (msg_type in ('image', 'video', 'chat') and 'Status de' in body):
+    _all_text = f"{body} {caption}".strip()
+    _is_status_share = (
+        msg_type == 'status'
+        or 'Status de' in _all_text
+        or ('@ Este grupo foi mencionado' in _all_text)
+        or (msg.get('isForwarded') and 'status' in str(msg.get('caption', '')).lower())
+    )
+    if _is_status_share:
         logger.info(f"STATUS_SHARE_BLOCKED: {sender_id[:20]} in {group_id[:20]}, type={msg_type}")
         enforce_result = await enforce_action("delete", group_id, msg_id, "", sender_id=sender_id)
         log_entry["status"] = "status_share_blocked"
