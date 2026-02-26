@@ -3868,6 +3868,20 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
     # 6b. PHONE NUMBER FILTER — Media ads must contain phone number in caption
     phone_required = cfg.get("phone_required_groups", [])
     if group_id in phone_required and msg_type in ('image', 'video', 'media', 'album'):
+        # RULE: Multiple images (album) are NEVER allowed — always delete
+        is_album = (
+            msg_type == 'album'
+            or msg.get('isAlbum', False)
+            or (msg.get('mediaCount', 1) or 1) > 1
+        )
+        if is_album:
+            logger.info(f"ALBUM_BLOCKED: {sender_id[:20]} in {group_id[:20]}, mediaCount={msg.get('mediaCount')}")
+            enforce_result = await enforce_action("delete", group_id, msg_id, "", sender_id=sender_id)
+            log_entry["status"] = "album_blocked"
+            log_entry["enforce_result"] = enforce_result
+            _log_webhook(log_entry)
+            return {"status": "album_blocked"}
+
         # For media messages body is base64 — only check caption/text fields
         text_to_check = (
             msg.get('caption')
