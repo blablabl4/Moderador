@@ -1028,7 +1028,8 @@ _phone_scan_processed: set = set()
 _PHONE_SCAN_MAX_CACHE = 500  # Limit cache size
 
 async def job_phone_scan():
-    """Periodic scan of phone_required_groups — react to valid ads, delete invalid ones."""
+    """Periodic scan of phone_required_groups — ONLY react to valid ads (never delete).
+    Deletion is ONLY done at webhook time when caption is guaranteed to be accurate."""
     global _phone_scan_processed
     phone_groups = cfg.get("phone_required_groups", [])
     if not phone_groups:
@@ -1053,18 +1054,19 @@ async def job_phone_scan():
                 msg_type = m.get('type', '')
                 if msg_type not in ('image', 'video'):
                     continue
-                caption = m.get('caption', '') or ''
+                # Check caption from multiple fields
+                caption = (m.get('caption') or m.get('body') or '')
+                # Skip if caption is clearly base64 media data (not real text)
+                if caption and len(caption) > 500 and '/' in caption:
+                    caption = ''
                 _phone_scan_processed.add(msg_id)
-                # Trim cache
                 if len(_phone_scan_processed) > _PHONE_SCAN_MAX_CACHE:
                     _phone_scan_processed = set(list(_phone_scan_processed)[-_PHONE_SCAN_MAX_CACHE:])
+                # ONLY react to valid ads — NEVER delete in the scan (history API may return empty captions)
                 if has_phone_number(caption):
                     await wpp.send_reaction(msg_id, group_id, approved_emoji)
                     logger.info(f"PHONE_SCAN: reacted {approved_emoji} on {msg_id[:40]}")
-                else:
-                    logger.info(f"PHONE_SCAN: deleting missing-phone msg {msg_id[:40]}")
-                    await wpp.delete_message(group_id, msg_id)
-                await asyncio.sleep(1)  # Small delay between actions
+                    await asyncio.sleep(0.5)
         except Exception as e:
             logger.warning(f"job_phone_scan error for {group_id[:25]}: {e}")
 
@@ -3865,18 +3867,26 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
 
     # 6b. PHONE NUMBER FILTER — Media ads must contain phone number in caption
     phone_required = cfg.get("phone_required_groups", [])
-    if group_id in phone_required and msg_type in ('image', 'video'):
-        # For media messages body is base64 — only check caption
-        text_to_check = caption
+    if group_id in phone_required and msg_type in ('image', 'video', 'media', 'album'):
+        # For media messages body is base64 — only check caption/text fields
+        text_to_check = (
+            msg.get('caption')
+            or msg.get('text')
+            or caption
+            or ''
+        )
+        # Ignore if it's base64 data accidentally in caption
+        if text_to_check and len(text_to_check) > 500 and '/' in text_to_check:
+            text_to_check = ''
         if not has_phone_number(text_to_check):
-            logger.info(f"PHONE_MISSING: {sender_id[:20]} in {group_id[:20]}, caption={str(text_to_check)[:50]}")
+            logger.info(f"PHONE_MISSING: {sender_id[:20]} in {group_id[:20]}, caption={str(text_to_check)[:60]}")
             enforce_result = await enforce_action("delete", group_id, msg_id, "", sender_id=sender_id)
             log_entry["status"] = "phone_missing"
             log_entry["enforce_result"] = enforce_result
             _log_webhook(log_entry)
             return {"status": "phone_missing"}
         else:
-            # Message is valid — react with ✅
+            # Message is valid — react with 🔁
             approved_emoji = cfg.get("phone_approved_emoji", "🔁")
             background_tasks.add_task(wpp.send_reaction, msg_id, group_id, approved_emoji)
             logger.info(f"PHONE_OK: reacted {approved_emoji} on {str(msg_id)[:30]}")
