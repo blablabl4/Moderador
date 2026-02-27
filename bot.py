@@ -1072,8 +1072,7 @@ async def job_phone_scan():
 
 
 async def job_sync_member_counts():
-    """Sync real member counts from WPPConnect API for all registered groups.
-    Runs every 5 minutes to keep dashboard and redirect roulette accurate."""
+    """Sync real member counts from WPPConnect API for all registered groups."""
     await ensure_token()
     db = SessionLocal()
     results = {}
@@ -1082,45 +1081,22 @@ async def job_sync_member_counts():
         logger.info(f"SYNC_MEMBERS: starting sync for {len(all_groups)} groups")
         for group in all_groups:
             try:
-                jid = group.group_jid
-                # Correct WPPConnect endpoint: group-members-ids returns list of participant JIDs
-                endpoints = [
-                    f"{wpp.base_url}/api/{wpp.session}/group-members-ids/{jid}",
-                    f"{wpp.base_url}/api/{wpp.session}/group-members/{jid}",
-                ]
-                members = None
-                for url in endpoints:
-                    try:
-                        async with httpx.AsyncClient(timeout=15.0) as client:
-                            resp = await client.get(url, headers=wpp.headers)
-                        logger.info(f"SYNC_MEMBERS: {group.name} url={url.split('/')[-2]} status={resp.status_code} raw={resp.text[:200]}")
-                        if resp.status_code == 200:
-                            data = resp.json()
-                            candidate = data.get('response', data) if isinstance(data, dict) else data
-                            if isinstance(candidate, list) and len(candidate) > 0:
-                                members = candidate
-                                break
-                    except Exception as e:
-                        logger.warning(f"SYNC_MEMBERS: endpoint error {e}")
-
-                if members is not None:
-                    real_count = len(members)
-                    results[group.name] = {"old": group.current_members, "new": real_count}
-                    if group.current_members != real_count:
-                        logger.info(f"SYNC_MEMBERS: ✅ {group.name} {group.current_members} -> {real_count}")
-                        group.current_members = real_count
-                        if real_count >= group.max_members and group.is_active:
-                            group.is_active = False
-                            logger.info(f"SYNC_MEMBERS: {group.name} FULL -> deactivated")
-                        elif real_count < group.max_members and not group.is_active:
-                            group.is_active = True
-                            logger.info(f"SYNC_MEMBERS: {group.name} has space -> reactivated")
-                    else:
-                        results[group.name]["status"] = "unchanged"
-                else:
-                    results[group.name] = {"error": "no members list from API"}
-                    logger.warning(f"SYNC_MEMBERS: ❌ {group.name} - no valid response from any endpoint")
-
+                members = await wpp.get_group_participants(group.group_jid)
+                real_count = len(members) if isinstance(members, list) else 0
+                logger.info(f"SYNC_MEMBERS: {group.name} API={real_count} DB={group.current_members}")
+                results[group.name] = {"old": group.current_members, "new": real_count, "api_returned": real_count}
+                if real_count > 0 and group.current_members != real_count:
+                    group.current_members = real_count
+                    logger.info(f"SYNC_MEMBERS: ✅ updated {group.name} to {real_count}")
+                    if real_count >= group.max_members and group.is_active:
+                        group.is_active = False
+                        logger.info(f"SYNC_MEMBERS: {group.name} FULL -> deactivated")
+                    elif real_count < group.max_members and not group.is_active:
+                        group.is_active = True
+                        logger.info(f"SYNC_MEMBERS: {group.name} has space -> reactivated")
+                elif real_count == 0:
+                    results[group.name]["warning"] = "API returned 0 members - skipped"
+                    logger.warning(f"SYNC_MEMBERS: ⚠️ {group.name} returned 0 members, skipping update")
                 await asyncio.sleep(0.5)
             except Exception as e:
                 results[group.group_jid] = {"error": str(e)}
@@ -1128,7 +1104,7 @@ async def job_sync_member_counts():
         db.commit()
         logger.info(f"SYNC_MEMBERS: done. results={results}")
     except Exception as e:
-        logger.error(f"SYNC_MEMBERS: fatal error: {e}")
+        logger.error(f"SYNC_MEMBERS: fatal: {e}")
         db.rollback()
     finally:
         db.close()
