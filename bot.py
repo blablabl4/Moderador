@@ -2214,25 +2214,32 @@ async def api_group_duplicates(username: str = Depends(get_current_username)):
     """Check duplicate members across ALL bot groups dynamically."""
     await ensure_token()
     try:
-        all_groups_raw = await wpp.get_all_groups()
-        if not all_groups_raw:
-            return {"error": "Nenhum grupo encontrado", "unique_members": 0, "duplicates_count": 0}
+        # Only scan MANAGED groups (from DB), not all bot groups
+        db_session = SessionLocal()
+        try:
+            managed = db_session.query(WhatsAppGroup).all()
+            groups_list = [(g.group_jid, g.name) for g in managed]
+        finally:
+            db_session.close()
 
-        # Parse group list into (jid, name) pairs
-        groups_list = []
-        for g in all_groups_raw:
-            if isinstance(g, dict):
-                gid = g.get("id", g.get("_serialized", ""))
-                if isinstance(gid, dict):
-                    gid = gid.get("_serialized", "")
-                gname = g.get("name", g.get("subject", str(gid)[:20]))
-            elif isinstance(g, str):
-                gid = g
-                gname = g[:20]
-            else:
-                continue
-            if gid:
-                groups_list.append((str(gid), str(gname)))
+        if not groups_list:
+            # Fallback: scan all groups if no managed groups exist
+            all_groups_raw = await wpp.get_all_groups()
+            if not all_groups_raw:
+                return {"error": "Nenhum grupo encontrado", "unique_members": 0, "duplicates_count": 0}
+            for g in all_groups_raw:
+                if isinstance(g, dict):
+                    gid = g.get("id", g.get("_serialized", ""))
+                    if isinstance(gid, dict):
+                        gid = gid.get("_serialized", "")
+                    gname = g.get("name", g.get("subject", str(gid)[:20]))
+                elif isinstance(g, str):
+                    gid = g
+                    gname = g[:20]
+                else:
+                    continue
+                if gid:
+                    groups_list.append((str(gid), str(gname)))
 
         def extract_phone(member):
             """Extract phone number from any WPPConnect participant format.
@@ -2257,9 +2264,9 @@ async def api_group_duplicates(username: str = Depends(get_current_username)):
             # Filter out LID-format entries (contain ':') and non-phone values
             if ':' in raw:
                 return None
-            # Only accept Brazilian phone numbers (10-13 digits: DDD+num or 55+DDD+num)
+            # Accept any numeric ID 8-15 digits (LID or phone — both are unique identifiers)
             digits = raw.replace('+', '').replace('-', '').replace(' ', '')
-            if digits.isdigit() and 10 <= len(digits) <= 13:
+            if digits.isdigit() and 8 <= len(digits) <= 15:
                 return digits
             return None
 
@@ -2727,10 +2734,10 @@ async def api_unique_members(request: Request, username: str = Depends(get_curre
                             phone = str(mid).split('@')[0]
                         else:
                             phone = str(m).split('@')[0]
-                        # Filter out LID-format entries and non-BR-phone values
+                        # Filter out non-numeric entries
                         if phone and ':' not in phone:
                             digits = phone.replace('+', '').replace('-', '').replace(' ', '')
-                            if digits.isdigit() and 10 <= len(digits) <= 13:
+                            if digits.isdigit() and 8 <= len(digits) <= 15:
                                 all_phones.add(digits)
             except Exception as e:
                 logger.error(f"UNIQUE_MEMBERS: error fetching {gid[:25]}: {e}")
