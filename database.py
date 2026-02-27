@@ -46,6 +46,7 @@ class UserStats(Base):
     window_start = Column(DateTime, default=datetime.utcnow) # Start of current flood window
     message_count = Column(Integer, default=0)
     photo_count = Column(Integer, default=0)
+    last_message_time = Column(DateTime, nullable=True)  # Time of last approved message
 
     __table_args__ = (UniqueConstraint('user_id', 'group_id', name='_user_group_uc'),)
 
@@ -116,20 +117,41 @@ class MemberEvent(Base):
     event_date = Column(Date, default=date.today, index=True)
     event_time = Column(DateTime, default=datetime.utcnow)
 
+class ModerationLog(Base):
+    """Persistent log of every message analyzed by the bot."""
+    __tablename__ = "moderation_log"
+
+    id = Column(Integer, primary_key=True, index=True)
+    timestamp = Column(DateTime, default=datetime.utcnow, index=True)
+    group_id = Column(String, index=True)
+    sender_id = Column(String, index=True)
+    msg_type = Column(String, default="")
+    msg_id = Column(String, default="")
+    caption = Column(String, default="")   # First 300 chars of text/caption
+    action = Column(String, default="")    # ok, phone_missing, album_blocked, flood, etc.
+    reason = Column(String, default="")    # Extra details
+
 def init_db():
     Base.metadata.create_all(bind=engine)
     # Migration: add new columns/tables if missing
     try:
         from sqlalchemy import inspect, text
         insp = inspect(engine)
-        
+
         # Migration 1: window_start in user_stats
         cols = [c['name'] for c in insp.get_columns('user_stats')]
         if 'window_start' not in cols:
             with engine.connect() as conn:
                 conn.execute(text("ALTER TABLE user_stats ADD COLUMN window_start DATETIME"))
                 conn.commit()
+
+        # Migration 2: last_message_time in user_stats
+        cols = [c['name'] for c in insp.get_columns('user_stats')]
+        if 'last_message_time' not in cols:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE user_stats ADD COLUMN last_message_time DATETIME"))
+                conn.commit()
+
+        # Migration 3: moderation_log table is created by create_all above
     except Exception:
         pass
-
-

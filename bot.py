@@ -19,7 +19,7 @@ import traceback
 from pydantic import BaseModel
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy.orm import Session
-from database import SessionLocal, UserStats, WhatsAppGroup, Affiliate, JoinTracking, HourlyActivity, MemberEvent, init_db
+from database import SessionLocal, UserStats, WhatsAppGroup, Affiliate, JoinTracking, HourlyActivity, MemberEvent, ModerationLog, init_db
 import settings as cfg
 
 # --- CONFIGURATION ---
@@ -1183,88 +1183,93 @@ def check_link_whitelist(text: str, caption: str = "") -> bool:
 _last_msg_times: dict[tuple[str, str], datetime] = {}
 
 def process_flood_control(db: Session, user_id: str, group_id: str, has_media: bool, text_len: int) -> dict:
-    """Check flood limits using a time-based window. Returns dict with 'allowed' bool.
-    
-    Each message counts individually to encourage users to post complete ads in one message.
+    """Check flood limits: max N ads per calendar day + minimum interval between ads.
+    Limits reset at midnight (non-cumulative).
     """
     if not cfg.get("moderation_enabled", True):
         return {"allowed": True, "debug": "moderation_disabled"}
     try:
         now = datetime.now()
+        today = now.date()
         stats = db.query(UserStats).filter_by(user_id=user_id, group_id=group_id).first()
-        
-        is_new = False
+
         if not stats:
-            is_new = True
             stats = UserStats(
-                user_id=user_id,
-                group_id=group_id,
-                last_active_date=date.today(),
-                window_start=now,
-                message_count=0,
-                photo_count=0
+                user_id=user_id, group_id=group_id,
+                last_active_date=today, window_start=now,
+                message_count=0, photo_count=0,
+                last_message_time=None
             )
             db.add(stats)
             db.flush()
-        
-        # Check if window has expired -> reset counters
-        # Support both new (minutes) and legacy (hours) settings
-        window_minutes = cfg.get("flood_window_minutes", None)
-        if window_minutes is None:
-            # Fallback: convert legacy hours setting to minutes
-            window_minutes = cfg.get("flood_window_hours", 2) * 60
-        window_minutes = max(5, int(window_minutes))  # Minimum 5 minutes
-        
-        window_start = stats.window_start or now
-        elapsed_minutes = (now - window_start).total_seconds() / 60
-        
-        if elapsed_minutes >= window_minutes:
-            stats.window_start = now
+
+        # Reset daily counters if it's a new calendar day (non-cumulative)
+        if stats.last_active_date != today:
+            stats.last_active_date = today
             stats.message_count = 0
             stats.photo_count = 0
-            stats.last_active_date = date.today()
-            logger.info(f"FLOOD_RESET: user={user_id[:20]}, elapsed={elapsed_minutes:.0f}min >= {window_minutes}min")
-        
-        max_msgs = cfg.get("flood_max_messages", 1)
-        max_photos = cfg.get("flood_max_photos", 3)
+            # NOTE: last_message_time intentionally NOT reset — keeps 1h interval across midnight
+            logger.info(f"FLOOD_DAILY_RESET: user={user_id[:20]} new day={today}")
+
+        daily_limit = cfg.get("flood_daily_limit", 2)
+        min_interval = cfg.get("flood_min_interval_minutes", 60)
         max_text = cfg.get("flood_max_text_length", 300)
-        
-        remaining_mins = max(0, int(window_minutes - elapsed_minutes))
-        remaining_hours = remaining_mins // 60
-        remaining_mins_only = remaining_mins % 60
-        
-        # Check message limit
-        if stats.message_count >= max_msgs:
+
+        # Check daily limit
+        if stats.message_count >= daily_limit:
             db.commit()
-            return {"allowed": False, "reason": "messages", "count": stats.message_count, "max": max_msgs, "reset_in_min": remaining_mins, "remaining_hours": remaining_hours, "remaining_mins_only": remaining_mins_only, "window_minutes": window_minutes}
-        
-        # Check photo limit
-        if has_media and stats.photo_count >= max_photos:
-            db.commit()
-            return {"allowed": False, "reason": "photos", "count": stats.photo_count, "max": max_photos, "reset_in_min": remaining_mins, "remaining_hours": remaining_hours, "remaining_mins_only": remaining_mins_only}
-        
+            return {"allowed": False, "reason": "daily_limit",
+                    "count": stats.message_count, "max": daily_limit}
+
+        # Check minimum interval between messages
+        if stats.last_message_time:
+            elapsed_min = (now - stats.last_message_time).total_seconds() / 60
+            if elapsed_min < min_interval:
+                remaining = int(min_interval - elapsed_min)
+                db.commit()
+                return {"allowed": False, "reason": "min_interval",
+                        "elapsed_min": round(elapsed_min, 1),
+                        "min_interval": min_interval,
+                        "wait_min": remaining}
+
         # Check text length (does NOT count against limit — user can retry with shorter text)
         if max_text > 0 and text_len > max_text:
             db.commit()
-            return {"allowed": False, "reason": "text_length", "text_len": text_len, "max_text": max_text}
-        
-        # Allowed -> increment counters
+            return {"allowed": False, "reason": "text_length",
+                    "text_len": text_len, "max_text": max_text}
+
+        # Allowed → increment counters
         stats.message_count += 1
-        logger.info(f"FLOOD_COUNT: user={user_id[:20]}, msg #{stats.message_count}/{max_msgs}")
-        
+        stats.last_message_time = now
+        stats.last_active_date = today
         if has_media:
             stats.photo_count += 1
-        
-        # Set window_start on first message if not set
-        if is_new or not stats.window_start:
-            stats.window_start = now
-            
+        logger.info(f"FLOOD_COUNT: user={user_id[:20]}, ad #{stats.message_count}/{daily_limit} today")
         db.commit()
-        return {"allowed": True, "count": stats.message_count, "max": max_msgs, "is_new": is_new}
+        return {"allowed": True, "count": stats.message_count, "max": daily_limit}
     except Exception as e:
         logger.error(f"Error in flood control: {e}")
         db.rollback()
         return {"allowed": True, "debug": f"error: {str(e)}"}
+
+
+def _save_moderation_log(group_id: str, sender_id: str, msg_type: str,
+                         msg_id: str, caption: str, action: str, reason: str = ""):
+    """Persist a moderation decision to the ModerationLog table."""
+    try:
+        db = SessionLocal()
+        entry = ModerationLog(
+            group_id=group_id, sender_id=sender_id,
+            msg_type=msg_type, msg_id=str(msg_id)[:100],
+            caption=str(caption or "")[:300],
+            action=action, reason=str(reason)[:200]
+        )
+        db.add(entry)
+        db.commit()
+        db.close()
+    except Exception as e:
+        logger.warning(f"_save_moderation_log error: {e}")
+
 
 # --- DASHBOARD ROUTES ---
 @app.get("/adm", response_class=HTMLResponse)
@@ -3923,7 +3928,7 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
         try:
             result = process_flood_control(db, sender_id, group_id, has_media, text_len)
             log_entry["flood_result"] = result
-            
+
             if not result["allowed"]:
                 reason = result.get("reason", "flood")
                 logger.info(f"BLOCKED: ({reason}) {sender_id[:20]} in {group_id[:20]}")
@@ -3932,12 +3937,16 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
                 log_entry["status"] = f"violation_{reason}"
                 log_entry["enforce_result"] = enforce_result
                 _log_webhook(log_entry)
+                background_tasks.add_task(_save_moderation_log, group_id, sender_id, msg_type,
+                                          msg_id, caption or body[:300], f"violation_{reason}", str(result))
                 return {"status": f"violation_{reason}"}
         finally:
             db.close()
 
     log_entry["status"] = "ok"
     _log_webhook(log_entry)
+    background_tasks.add_task(_save_moderation_log, group_id, sender_id, msg_type,
+                              msg_id, caption or body[:300], "ok", "")
     return {"status": "ok"}
 
 if __name__ == "__main__":

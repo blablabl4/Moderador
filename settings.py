@@ -44,6 +44,9 @@ DEFAULTS = {
     "monitored_groups": [],           # Empty = ALL groups; list of group IDs = only those
     "broadcast_test_group_id": "120363424437184928@g.us",  # Grupo "Teste moderador"
     "phone_required_groups": ["120363406870144681@g.us"],  # Groups where ads must have phone number
+    "phone_approved_emoji": "🔁",      # Emoji to react with on approved ads
+    "flood_daily_limit": 2,            # Max ads per calendar day (resets at midnight)
+    "flood_min_interval_minutes": 60,  # Min interval between ads (minutes)
 }
 
 _settings = None
