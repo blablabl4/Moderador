@@ -1162,7 +1162,7 @@ async def proxy_vendas(request: Request, path: str):
             raise HTTPException(status_code=502, detail="Error proxying request to Vercel")
 
 # --- BUSINESS LOGIC HELPER ---
-LINK_REGEX = re.compile(r"(https?://|www\.|chat\.whatsapp\.com)")
+LINK_REGEX = re.compile(r"(https?://|www\.|chat\.whatsapp\.com|wa\.me/)")
 
 def check_link_whitelist(text: str, caption: str = "") -> bool:
     """Check if text/caption contains non-whitelisted links. Returns True if OK."""
@@ -1235,8 +1235,9 @@ def process_flood_control(db: Session, user_id: str, group_id: str, has_media: b
                         "elapsed_min": round(elapsed_min, 1),
                         "min_interval": min_interval, "wait_min": remaining}
 
-        # Check text length (user can retry immediately with shorter text)
-        if max_text > 0 and text_len > max_text:
+        # Check text length — skip for phone_required groups (ad descriptions can be long)
+        phone_groups = cfg.get("phone_required_groups", [])
+        if max_text > 0 and text_len > max_text and group_id not in phone_groups:
             db.commit()
             return {"allowed": False, "reason": "text_length",
                     "text_len": text_len, "max_text": max_text}
@@ -3862,8 +3863,9 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
         _log_webhook(log_entry)
         return {"status": "status_share_blocked"}
     
-    # 6. Link Filter (checks body AND caption)
-    if not check_link_whitelist(body, caption):
+    # 6. Link Filter — check caption only (body may be base64 for media messages)
+    _link_text = caption if msg_type in ('image', 'video', 'media', 'album') else body
+    if not check_link_whitelist(_link_text, caption):
         logger.info(f"Link violation from {sender_id[:20]} in {group_id[:20]}")
         link_action = cfg.get("link_action", "delete")
         link_warn = cfg.get("link_warn_message", "⚠️ Links externos não são permitidos neste grupo.")
@@ -3871,6 +3873,7 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
         log_entry["status"] = "link_violation"
         log_entry["enforce_result"] = enforce_result
         _log_webhook(log_entry)
+        background_tasks.add_task(_save_moderation_log, group_id, sender_id, msg_type, msg_id, _link_text[:300], "link_violation", "")
         return {"status": "link_violation"}
 
     # 6b. PHONE NUMBER FILTER — ALL messages must contain phone number
