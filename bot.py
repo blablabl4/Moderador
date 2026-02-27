@@ -1235,9 +1235,8 @@ def process_flood_control(db: Session, user_id: str, group_id: str, has_media: b
                         "elapsed_min": round(elapsed_min, 1),
                         "min_interval": min_interval, "wait_min": remaining}
 
-        # Check text length — skip for phone_required groups (ad descriptions can be long)
-        phone_groups = cfg.get("phone_required_groups", [])
-        if max_text > 0 and text_len > max_text and group_id not in phone_groups:
+        # Check text length (>300 chars = delete, user must repost shorter)
+        if max_text > 0 and text_len > max_text:
             db.commit()
             return {"allowed": False, "reason": "text_length",
                     "text_len": text_len, "max_text": max_text}
