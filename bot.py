@@ -2235,19 +2235,32 @@ async def api_group_duplicates(username: str = Depends(get_current_username)):
                 groups_list.append((str(gid), str(gname)))
 
         def extract_phone(member):
-            """Extract phone number from any WPPConnect participant format."""
+            """Extract phone number from any WPPConnect participant format.
+            Filters out LID-format entries (e.g. '12345:67@lid') that are not real phones."""
+            raw = None
             if isinstance(member, str):
-                return member.split('@')[0]
-            if isinstance(member, dict):
+                raw = member.split('@')[0]
+            elif isinstance(member, dict):
                 for field in ['id', '_serialized', 'user']:
                     val = member.get(field, '')
                     if val:
                         if isinstance(val, dict):
                             inner = val.get('_serialized', val.get('user', ''))
                             if inner:
-                                return str(inner).split('@')[0]
+                                raw = str(inner).split('@')[0]
+                                break
                         else:
-                            return str(val).split('@')[0]
+                            raw = str(val).split('@')[0]
+                            break
+            if not raw:
+                return None
+            # Filter out LID-format entries (contain ':') and non-phone values
+            if ':' in raw:
+                return None
+            # Only accept values that look like phone numbers (digits only, 10-15 chars)
+            digits = raw.replace('+', '').replace('-', '').replace(' ', '')
+            if digits.isdigit() and 8 <= len(digits) <= 15:
+                return digits
             return None
 
         # Collect admin phones to exclude
@@ -2714,8 +2727,11 @@ async def api_unique_members(request: Request, username: str = Depends(get_curre
                             phone = str(mid).split('@')[0]
                         else:
                             phone = str(m).split('@')[0]
-                        if phone and len(phone) >= 8:
-                            all_phones.add(phone)
+                        # Filter out LID-format entries (contain ':') — not real phones
+                        if phone and ':' not in phone:
+                            digits = phone.replace('+', '').replace('-', '').replace(' ', '')
+                            if digits.isdigit() and 8 <= len(digits) <= 15:
+                                all_phones.add(digits)
             except Exception as e:
                 logger.error(f"UNIQUE_MEMBERS: error fetching {gid[:25]}: {e}")
 
