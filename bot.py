@@ -2257,9 +2257,9 @@ async def api_group_duplicates(username: str = Depends(get_current_username)):
             # Filter out LID-format entries (contain ':') and non-phone values
             if ':' in raw:
                 return None
-            # Only accept values that look like phone numbers (digits only, 10-15 chars)
+            # Only accept Brazilian phone numbers (10-13 digits: DDD+num or 55+DDD+num)
             digits = raw.replace('+', '').replace('-', '').replace(' ', '')
-            if digits.isdigit() and 8 <= len(digits) <= 15:
+            if digits.isdigit() and 10 <= len(digits) <= 13:
                 return digits
             return None
 
@@ -2727,10 +2727,10 @@ async def api_unique_members(request: Request, username: str = Depends(get_curre
                             phone = str(mid).split('@')[0]
                         else:
                             phone = str(m).split('@')[0]
-                        # Filter out LID-format entries (contain ':') — not real phones
+                        # Filter out LID-format entries and non-BR-phone values
                         if phone and ':' not in phone:
                             digits = phone.replace('+', '').replace('-', '').replace(' ', '')
-                            if digits.isdigit() and 8 <= len(digits) <= 15:
+                            if digits.isdigit() and 10 <= len(digits) <= 13:
                                 all_phones.add(digits)
             except Exception as e:
                 logger.error(f"UNIQUE_MEMBERS: error fetching {gid[:25]}: {e}")
