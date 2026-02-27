@@ -1159,9 +1159,10 @@ async def lifespan(app: FastAPI):
         # Subscribe webhook once
         logger.info("Subscribing webhook...")
         await wpp.subscribe_webhook()
-        # NOTE: sync_historical_messages DISABLED - it was inflating counters
-        # Users who posted before reconnect were getting immediately blocked
-        logger.info("Startup sequence complete (sync disabled)")
+        # Immediately sync real member counts to fix stale DB values
+        logger.info("Running immediate member count sync...")
+        await job_sync_member_counts()
+        logger.info("Startup sequence complete")
     
     asyncio.create_task(startup_sequence())
     yield
