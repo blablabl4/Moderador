@@ -3958,7 +3958,10 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
             db.close()
 
     # 6c. PHONE NUMBER FILTER — ALL messages must contain phone number
-    if group_id in phone_required and msg_type in ('image', 'video', 'media', 'album', 'chat'):
+    # Apply to ALL message types (not just specific ones). Only skip if msg_type unknown.
+    _phone_types = ('image', 'video', 'media', 'album', 'chat', 'ptt', 'audio', 'document', 'vcard', 'location')
+    logger.info(f"PHONE_FILTER_DEBUG: type={msg_type} group_in_required={group_id in phone_required} caption={str(caption)[:80]} body_len={len(body)}")
+    if group_id in phone_required and (msg_type in _phone_types or msg_type not in ('sticker', 'status', 'revoked', 'e2e_notification', 'notification_template', 'gp2', 'ciphertext')):
         # RULE: Multiple images (album) are NEVER allowed — always delete
         is_album = (
             msg_type == 'album'
