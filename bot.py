@@ -3205,8 +3205,8 @@ async def enforce_action(action: str, group_id: str, msg_id: str, warn_text: str
     
     logger.info(f"enforce_action: action={action}, group={group_id}, msg_id={msg_id}")
     try:
-        # Anti-ban: random delay (1-3s) to appear human
-        delay = random.uniform(1.0, 3.0)
+        # Anti-ban: small delay to avoid rate-limit detection
+        delay = random.uniform(0.2, 0.5)
         await asyncio.sleep(delay)
         result["delay"] = round(delay, 1)
         
@@ -3929,8 +3929,36 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
         background_tasks.add_task(_save_moderation_log, group_id, sender_id, msg_type, msg_id, _link_text[:300], "link_violation", "")
         return {"status": "link_violation"}
 
-    # 6b. PHONE NUMBER FILTER — ALL messages must contain phone number
+    # 6b. FLOOD CONTROL — runs FIRST so every message counts toward daily limit
+    # (even invalid ones that will be deleted by phone filter)
     phone_required = cfg.get("phone_required_groups", [])
+    has_media = msg_type in ('image', 'video', 'document', 'sticker')
+    if has_media:
+        text_len = len(caption)
+    else:
+        text_len = len(body)
+    
+    flood_lock = _get_flood_lock(sender_id, group_id)
+    async with flood_lock:
+        db = SessionLocal()
+        try:
+            result = process_flood_control(db, sender_id, group_id, has_media, text_len)
+            log_entry["flood_result"] = result
+
+            if not result["allowed"]:
+                reason = result.get("reason", "flood")
+                logger.info(f"BLOCKED: ({reason}) {sender_id[:20]} in {group_id[:20]}")
+                enforce_result = await enforce_action("delete", group_id, msg_id, "", sender_id=sender_id)
+                log_entry["status"] = f"violation_{reason}"
+                log_entry["enforce_result"] = enforce_result
+                _log_webhook(log_entry)
+                background_tasks.add_task(_save_moderation_log, group_id, sender_id, msg_type,
+                                          msg_id, caption or body[:300], f"violation_{reason}", str(result))
+                return {"status": f"violation_{reason}"}
+        finally:
+            db.close()
+
+    # 6c. PHONE NUMBER FILTER — ALL messages must contain phone number
     if group_id in phone_required and msg_type in ('image', 'video', 'media', 'album', 'chat'):
         # RULE: Multiple images (album) are NEVER allowed — always delete
         is_album = (
@@ -3972,35 +4000,6 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
             approved_emoji = cfg.get("phone_approved_emoji", "🔁")
             background_tasks.add_task(wpp.send_reaction, msg_id, group_id, approved_emoji)
             logger.info(f"PHONE_OK: reacted {approved_emoji} on {str(msg_id)[:30]}")
-
-    # 6c. Flood Control (locked per user to prevent race with grouped images)
-    has_media = msg_type in ('image', 'video', 'document', 'sticker')
-    # IMPORTANT: For media messages, body contains base64 data (huge), use caption only
-    if has_media:
-        text_len = len(caption)
-    else:
-        text_len = len(body)
-    
-    flood_lock = _get_flood_lock(sender_id, group_id)
-    async with flood_lock:
-        db = SessionLocal()
-        try:
-            result = process_flood_control(db, sender_id, group_id, has_media, text_len)
-            log_entry["flood_result"] = result
-
-            if not result["allowed"]:
-                reason = result.get("reason", "flood")
-                logger.info(f"BLOCKED: ({reason}) {sender_id[:20]} in {group_id[:20]}")
-                # Silent delete — no educational message
-                enforce_result = await enforce_action("delete", group_id, msg_id, "", sender_id=sender_id)
-                log_entry["status"] = f"violation_{reason}"
-                log_entry["enforce_result"] = enforce_result
-                _log_webhook(log_entry)
-                background_tasks.add_task(_save_moderation_log, group_id, sender_id, msg_type,
-                                          msg_id, caption or body[:300], f"violation_{reason}", str(result))
-                return {"status": f"violation_{reason}"}
-        finally:
-            db.close()
 
     log_entry["status"] = "ok"
     _log_webhook(log_entry)
