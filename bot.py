@@ -3826,6 +3826,12 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
                 return {"status": "admin_broadcast_started"}
 
         
+        # ABSOLUTE RULES: stickers and status shares blocked even for group admins
+        if msg_type == 'sticker' and cfg.get("sticker_filter_enabled", True):
+            logger.info(f"STICKER_BLOCKED (admin): {sender_id[:20]} in {group_id[:20]}")
+            await enforce_action("delete", group_id, msg_id, "", sender_id=sender_id)
+            return {"status": "sticker_blocked"}
+
         log_entry["status"] = "group_admin_bypass"
         _log_webhook(log_entry)
         return {"status": "group_admin_bypass"}
@@ -3837,7 +3843,7 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
         _log_webhook(log_entry)
         return {"status": "group_not_monitored"}
     
-    # 5. STICKER FILTER — Delete ALL stickers automatically
+    # 5. STICKER FILTER — Delete ALL stickers (non-admins)
     if msg_type == 'sticker' and cfg.get("sticker_filter_enabled", True):
         logger.info(f"STICKER_BLOCKED: {sender_id[:20]} in {group_id[:20]}")
         enforce_result = await enforce_action("delete", group_id, msg_id, "", sender_id=sender_id)
