@@ -3865,9 +3865,9 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
         _log_webhook(log_entry)
         return {"status": "link_violation"}
 
-    # 6b. PHONE NUMBER FILTER — Media ads must contain phone number in caption
+    # 6b. PHONE NUMBER FILTER — ALL messages must contain phone number
     phone_required = cfg.get("phone_required_groups", [])
-    if group_id in phone_required and msg_type in ('image', 'video', 'media', 'album'):
+    if group_id in phone_required and msg_type in ('image', 'video', 'media', 'album', 'chat'):
         # RULE: Multiple images (album) are NEVER allowed — always delete
         is_album = (
             msg_type == 'album'
@@ -3882,18 +3882,22 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
             _log_webhook(log_entry)
             return {"status": "album_blocked"}
 
-        # For media messages body is base64 — only check caption/text fields
-        text_to_check = (
-            msg.get('caption')
-            or msg.get('text')
-            or caption
-            or ''
-        )
-        # Ignore if it's base64 data accidentally in caption
-        if text_to_check and len(text_to_check) > 500 and '/' in text_to_check:
-            text_to_check = ''
+        # For media: use caption. For text (chat): use body directly
+        if msg_type == 'chat':
+            text_to_check = body or ''
+        else:
+            text_to_check = (
+                msg.get('caption')
+                or msg.get('text')
+                or caption
+                or ''
+            )
+            # Ignore base64 data accidentally in caption
+            if text_to_check and len(text_to_check) > 500 and '/' in text_to_check:
+                text_to_check = ''
+
         if not has_phone_number(text_to_check):
-            logger.info(f"PHONE_MISSING: {sender_id[:20]} in {group_id[:20]}, caption={str(text_to_check)[:60]}")
+            logger.info(f"PHONE_MISSING: {sender_id[:20]} in {group_id[:20]}, text={str(text_to_check)[:60]}")
             enforce_result = await enforce_action("delete", group_id, msg_id, "", sender_id=sender_id)
             log_entry["status"] = "phone_missing"
             log_entry["enforce_result"] = enforce_result
