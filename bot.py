@@ -1083,10 +1083,10 @@ async def job_sync_member_counts():
         for group in all_groups:
             try:
                 jid = group.group_jid
-                # Try two common WPPConnect endpoint variants
+                # Correct WPPConnect endpoint: group-members-ids returns list of participant JIDs
                 endpoints = [
+                    f"{wpp.base_url}/api/{wpp.session}/group-members-ids/{jid}",
                     f"{wpp.base_url}/api/{wpp.session}/group-members/{jid}",
-                    f"{wpp.base_url}/api/{wpp.session}/get-group-admin-members/{jid}",
                 ]
                 members = None
                 for url in endpoints:
