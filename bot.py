@@ -1528,18 +1528,17 @@ def parse_group(g):
     meta = g.get('groupMetadata', {}) or {}
     
     name = contact.get('name') or contact.get('formattedName') or meta.get('subject') or g.get('name') or 'Sem nome'
-    size = meta.get('size', 0) or 0
     
     # Check if bot is admin by looking at groupMetadata.participants
     participants = meta.get('participants', []) or []
     is_admin = False
+    # ALWAYS prefer real participant count over stale meta.size
+    size = len(participants) if isinstance(participants, list) and len(participants) > 0 else (meta.get('size', 0) or 0)
+    
     if isinstance(participants, list):
-        if size == 0:
-            size = len(participants)
         for p in participants:
             pid = p.get('id', {}).get('_serialized') if isinstance(p.get('id'), dict) else p.get('id', '')
             if p.get('isMe') or (pid and 'lid' in pid):
-                # Check if any participant that is the bot has admin
                 if p.get('isSuperAdmin') or p.get('isAdmin'):
                     is_admin = True
     
