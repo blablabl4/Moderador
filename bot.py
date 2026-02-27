@@ -1070,6 +1070,45 @@ async def job_phone_scan():
         except Exception as e:
             logger.warning(f"job_phone_scan error for {group_id[:25]}: {e}")
 
+
+async def job_sync_member_counts():
+    """Sync real member counts from WPPConnect API for all registered groups.
+    Runs every 5 minutes to keep dashboard and redirect roulette accurate."""
+    await ensure_token()
+    db = SessionLocal()
+    try:
+        groups = db.query(WhatsAppGroup).filter_by(is_active=True).all()
+        all_groups = db.query(WhatsAppGroup).all()  # also sync inactive to catch re-openers
+        for group in all_groups:
+            try:
+                url = f"{wpp.base_url}/api/{wpp.session}/group-members/{group.group_jid}"
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    resp = await client.get(url, headers=wpp.headers)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    # WPPConnect returns {response: [...members...]} or direct list
+                    members = data.get('response', data) if isinstance(data, dict) else data
+                    if isinstance(members, list):
+                        real_count = len(members)
+                        if group.current_members != real_count:
+                            logger.info(f"SYNC_MEMBERS: {group.name} {group.current_members} -> {real_count}")
+                            group.current_members = real_count
+                            # Auto-manage is_active based on capacity
+                            if real_count >= group.max_members and group.is_active:
+                                group.is_active = False
+                                logger.info(f"SYNC_MEMBERS: {group.name} FULL -> deactivated")
+                            elif real_count < group.max_members and not group.is_active:
+                                group.is_active = True
+                                logger.info(f"SYNC_MEMBERS: {group.name} has space -> reactivated")
+                await asyncio.sleep(1)  # rate-limit between requests
+            except Exception as e:
+                logger.warning(f"job_sync_member_counts: error for {group.name}: {e}")
+        db.commit()
+    except Exception as e:
+        logger.error(f"job_sync_member_counts: {e}")
+    finally:
+        db.close()
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Bot starting up...")
@@ -1108,8 +1147,9 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(job_watchdog, 'interval', minutes=5, id='watchdog')
     scheduler.add_job(job_sync_invite_links, 'interval', minutes=10, id='sync_invite_links')
     scheduler.add_job(job_phone_scan, 'interval', minutes=5, id='phone_scan')
+    scheduler.add_job(job_sync_member_counts, 'interval', minutes=5, id='sync_member_counts')
     scheduler.start()
-    logger.info("Scheduler started: watchdog(5m), invite_sync(10m). exclusive_cleanup=MANUAL_ONLY")
+    logger.info("Scheduler started: watchdog(5m), invite_sync(10m), phone_scan(5m), member_sync(5m).")
     
     async def startup_sequence():
         await wpp.start_session()
