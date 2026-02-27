@@ -1076,38 +1076,63 @@ async def job_sync_member_counts():
     Runs every 5 minutes to keep dashboard and redirect roulette accurate."""
     await ensure_token()
     db = SessionLocal()
+    results = {}
     try:
-        groups = db.query(WhatsAppGroup).filter_by(is_active=True).all()
-        all_groups = db.query(WhatsAppGroup).all()  # also sync inactive to catch re-openers
+        all_groups = db.query(WhatsAppGroup).all()
+        logger.info(f"SYNC_MEMBERS: starting sync for {len(all_groups)} groups")
         for group in all_groups:
             try:
-                url = f"{wpp.base_url}/api/{wpp.session}/group-members/{group.group_jid}"
-                async with httpx.AsyncClient(timeout=15.0) as client:
-                    resp = await client.get(url, headers=wpp.headers)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    # WPPConnect returns {response: [...members...]} or direct list
-                    members = data.get('response', data) if isinstance(data, dict) else data
-                    if isinstance(members, list):
-                        real_count = len(members)
-                        if group.current_members != real_count:
-                            logger.info(f"SYNC_MEMBERS: {group.name} {group.current_members} -> {real_count}")
-                            group.current_members = real_count
-                            # Auto-manage is_active based on capacity
-                            if real_count >= group.max_members and group.is_active:
-                                group.is_active = False
-                                logger.info(f"SYNC_MEMBERS: {group.name} FULL -> deactivated")
-                            elif real_count < group.max_members and not group.is_active:
-                                group.is_active = True
-                                logger.info(f"SYNC_MEMBERS: {group.name} has space -> reactivated")
-                await asyncio.sleep(1)  # rate-limit between requests
+                jid = group.group_jid
+                # Try two common WPPConnect endpoint variants
+                endpoints = [
+                    f"{wpp.base_url}/api/{wpp.session}/group-members/{jid}",
+                    f"{wpp.base_url}/api/{wpp.session}/get-group-admin-members/{jid}",
+                ]
+                members = None
+                for url in endpoints:
+                    try:
+                        async with httpx.AsyncClient(timeout=15.0) as client:
+                            resp = await client.get(url, headers=wpp.headers)
+                        logger.info(f"SYNC_MEMBERS: {group.name} url={url.split('/')[-2]} status={resp.status_code} raw={resp.text[:200]}")
+                        if resp.status_code == 200:
+                            data = resp.json()
+                            candidate = data.get('response', data) if isinstance(data, dict) else data
+                            if isinstance(candidate, list) and len(candidate) > 0:
+                                members = candidate
+                                break
+                    except Exception as e:
+                        logger.warning(f"SYNC_MEMBERS: endpoint error {e}")
+
+                if members is not None:
+                    real_count = len(members)
+                    results[group.name] = {"old": group.current_members, "new": real_count}
+                    if group.current_members != real_count:
+                        logger.info(f"SYNC_MEMBERS: ✅ {group.name} {group.current_members} -> {real_count}")
+                        group.current_members = real_count
+                        if real_count >= group.max_members and group.is_active:
+                            group.is_active = False
+                            logger.info(f"SYNC_MEMBERS: {group.name} FULL -> deactivated")
+                        elif real_count < group.max_members and not group.is_active:
+                            group.is_active = True
+                            logger.info(f"SYNC_MEMBERS: {group.name} has space -> reactivated")
+                    else:
+                        results[group.name]["status"] = "unchanged"
+                else:
+                    results[group.name] = {"error": "no members list from API"}
+                    logger.warning(f"SYNC_MEMBERS: ❌ {group.name} - no valid response from any endpoint")
+
+                await asyncio.sleep(0.5)
             except Exception as e:
-                logger.warning(f"job_sync_member_counts: error for {group.name}: {e}")
+                results[group.group_jid] = {"error": str(e)}
+                logger.warning(f"SYNC_MEMBERS: error for {group.name}: {e}")
         db.commit()
+        logger.info(f"SYNC_MEMBERS: done. results={results}")
     except Exception as e:
-        logger.error(f"job_sync_member_counts: {e}")
+        logger.error(f"SYNC_MEMBERS: fatal error: {e}")
+        db.rollback()
     finally:
         db.close()
+    return results
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -1324,6 +1349,12 @@ async def ensure_token():
     """Make sure we have a valid token, regenerate if needed."""
     if not wpp.token:
         await wpp.generate_token()
+
+@app.get("/api/sync-members")
+async def api_sync_members(username: str = Depends(get_current_username)):
+    """Manually trigger member count sync. Returns results per group."""
+    results = await job_sync_member_counts()
+    return JSONResponse({"status": "done", "results": results or {}})
 
 @app.get("/api/status")
 async def api_status(username: str = Depends(get_current_username)):
