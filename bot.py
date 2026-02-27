@@ -1184,6 +1184,7 @@ _last_msg_times: dict[tuple[str, str], datetime] = {}
 
 def process_flood_control(db: Session, user_id: str, group_id: str, has_media: bool, text_len: int) -> dict:
     """Check flood limits: max N ads per calendar day + minimum interval between ads.
+    Uses only EXISTING columns: window_start (= time of last approved msg), last_active_date, message_count.
     Limits reset at midnight (non-cumulative).
     """
     if not cfg.get("moderation_enabled", True):
@@ -1196,19 +1197,19 @@ def process_flood_control(db: Session, user_id: str, group_id: str, has_media: b
         if not stats:
             stats = UserStats(
                 user_id=user_id, group_id=group_id,
-                last_active_date=today, window_start=now,
+                last_active_date=today, window_start=None,
                 message_count=0, photo_count=0,
-                last_message_time=None
             )
             db.add(stats)
             db.flush()
 
         # Reset daily counters if it's a new calendar day (non-cumulative)
-        if stats.last_active_date != today:
+        last_date = stats.last_active_date
+        if last_date is None or (hasattr(last_date, 'date') and last_date != today) or last_date != today:
             stats.last_active_date = today
             stats.message_count = 0
             stats.photo_count = 0
-            # NOTE: last_message_time intentionally NOT reset — keeps 1h interval across midnight
+            # window_start NOT reset — keeps 1h interval across midnight boundary
             logger.info(f"FLOOD_DAILY_RESET: user={user_id[:20]} new day={today}")
 
         daily_limit = cfg.get("flood_daily_limit", 2)
@@ -1218,37 +1219,39 @@ def process_flood_control(db: Session, user_id: str, group_id: str, has_media: b
         # Check daily limit
         if stats.message_count >= daily_limit:
             db.commit()
+            logger.info(f"FLOOD_DAILY_LIMIT: user={user_id[:20]} count={stats.message_count}/{daily_limit}")
             return {"allowed": False, "reason": "daily_limit",
                     "count": stats.message_count, "max": daily_limit}
 
-        # Check minimum interval between messages
-        if stats.last_message_time:
-            elapsed_min = (now - stats.last_message_time).total_seconds() / 60
+        # Check minimum interval (window_start = time of last approved message)
+        last_msg_time = stats.window_start
+        if last_msg_time:
+            elapsed_min = (now - last_msg_time).total_seconds() / 60
             if elapsed_min < min_interval:
                 remaining = int(min_interval - elapsed_min)
                 db.commit()
+                logger.info(f"FLOOD_INTERVAL: user={user_id[:20]} elapsed={elapsed_min:.1f}m < {min_interval}m, wait={remaining}m")
                 return {"allowed": False, "reason": "min_interval",
                         "elapsed_min": round(elapsed_min, 1),
-                        "min_interval": min_interval,
-                        "wait_min": remaining}
+                        "min_interval": min_interval, "wait_min": remaining}
 
-        # Check text length (does NOT count against limit — user can retry with shorter text)
+        # Check text length (user can retry immediately with shorter text)
         if max_text > 0 and text_len > max_text:
             db.commit()
             return {"allowed": False, "reason": "text_length",
                     "text_len": text_len, "max_text": max_text}
 
-        # Allowed → increment counters
+        # Allowed → increment counters, record time
         stats.message_count += 1
-        stats.last_message_time = now
+        stats.window_start = now   # track time of last approved message
         stats.last_active_date = today
         if has_media:
             stats.photo_count += 1
-        logger.info(f"FLOOD_COUNT: user={user_id[:20]}, ad #{stats.message_count}/{daily_limit} today")
+        logger.info(f"FLOOD_OK: user={user_id[:20]}, ad #{stats.message_count}/{daily_limit} today")
         db.commit()
         return {"allowed": True, "count": stats.message_count, "max": daily_limit}
     except Exception as e:
-        logger.error(f"Error in flood control: {e}")
+        logger.error(f"Error in flood control: {e}", exc_info=True)
         db.rollback()
         return {"allowed": True, "debug": f"error: {str(e)}"}
 
