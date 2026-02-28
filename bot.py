@@ -3901,7 +3901,7 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
         # ABSOLUTE RULES: stickers and status shares blocked even for group admins
         if msg_type == 'sticker' and cfg.get("sticker_filter_enabled", True):
             logger.info(f"STICKER_BLOCKED (admin): {sender_id[:20]} in {group_id[:20]}")
-            await enforce_action("delete", group_id, msg_id, "", sender_id=sender_id)
+            await enforce_action("delete", group_id, msg_id, "🚫 Stickers não são permitidos neste grupo.", sender_id=sender_id)
             return {"status": "sticker_blocked"}
 
         log_entry["status"] = "group_admin_bypass"
@@ -3918,7 +3918,7 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
     # 5. STICKER FILTER — Delete ALL stickers (non-admins)
     if msg_type == 'sticker' and cfg.get("sticker_filter_enabled", True):
         logger.info(f"STICKER_BLOCKED: {sender_id[:20]} in {group_id[:20]}")
-        enforce_result = await enforce_action("delete", group_id, msg_id, "", sender_id=sender_id)
+        enforce_result = await enforce_action("delete", group_id, msg_id, "🚫 Stickers não são permitidos neste grupo.", sender_id=sender_id)
         log_entry["status"] = "sticker_blocked"
         log_entry["enforce_result"] = enforce_result
         _log_webhook(log_entry)
@@ -3934,7 +3934,7 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
     )
     if _is_status_share:
         logger.info(f"STATUS_SHARE_BLOCKED: {sender_id[:20]} in {group_id[:20]}, type={msg_type}")
-        enforce_result = await enforce_action("delete", group_id, msg_id, "", sender_id=sender_id)
+        enforce_result = await enforce_action("delete", group_id, msg_id, "🚫 Compartilhamento de status não é permitido.", sender_id=sender_id)
         log_entry["status"] = "status_share_blocked"
         log_entry["enforce_result"] = enforce_result
         _log_webhook(log_entry)
@@ -3972,7 +3972,16 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
             if not result["allowed"]:
                 reason = result.get("reason", "flood")
                 logger.info(f"BLOCKED: ({reason}) {sender_id[:20]} in {group_id[:20]}")
-                enforce_result = await enforce_action("delete", group_id, msg_id, "", sender_id=sender_id)
+                # Build specific reason message
+                if reason == "daily_limit":
+                    _flood_msg = f"🚫 Limite diário atingido ({result.get('count', '?')}/{result.get('max', '?')} anúncios). Tente novamente amanhã."
+                elif reason == "min_interval":
+                    _flood_msg = f"🚫 Aguarde {result.get('wait_min', '?')} minutos antes de postar novamente."
+                elif reason == "text_length":
+                    _flood_msg = f"🚫 Texto muito longo ({result.get('text_len', '?')} chars). Máximo: {result.get('max_text', 300)} caracteres."
+                else:
+                    _flood_msg = "🚫 Mensagem bloqueada pelo controle de flood."
+                enforce_result = await enforce_action("delete", group_id, msg_id, _flood_msg, sender_id=sender_id)
                 log_entry["status"] = f"violation_{reason}"
                 log_entry["enforce_result"] = enforce_result
                 _log_webhook(log_entry)
@@ -3995,7 +4004,7 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
         )
         if is_album:
             logger.info(f"ALBUM_BLOCKED: {sender_id[:20]} in {group_id[:20]}, mediaCount={msg.get('mediaCount')}")
-            enforce_result = await enforce_action("delete", group_id, msg_id, "", sender_id=sender_id)
+            enforce_result = await enforce_action("delete", group_id, msg_id, "🚫 Álbuns (múltiplas fotos) não são permitidos. Envie apenas 1 foto por anúncio.", sender_id=sender_id)
             log_entry["status"] = "album_blocked"
             log_entry["enforce_result"] = enforce_result
             _log_webhook(log_entry)
@@ -4017,7 +4026,7 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
 
         if not has_phone_number(text_to_check):
             logger.info(f"PHONE_MISSING: {sender_id[:20]} in {group_id[:20]}, text={str(text_to_check)[:60]}")
-            enforce_result = await enforce_action("delete", group_id, msg_id, "", sender_id=sender_id)
+            enforce_result = await enforce_action("delete", group_id, msg_id, "🚫 Anúncio sem número de telefone na legenda. Inclua seu contato e reposte.", sender_id=sender_id)
             log_entry["status"] = "phone_missing"
             log_entry["enforce_result"] = enforce_result
             _log_webhook(log_entry)
