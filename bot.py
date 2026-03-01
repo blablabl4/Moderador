@@ -2208,6 +2208,94 @@ async def page_ranking(request: Request):
     finally:
         db.close()
 
+# --- Ad Tracking per Phone (Admin) ---
+
+@app.get("/api/admin/ad-tracking")
+async def api_ad_tracking(
+    period: str = "month",
+    start_date: str = "",
+    end_date: str = "",
+    username: str = Depends(get_current_username)
+):
+    """Track valid ads and violations per phone number for group 120363406870144681@g.us.
+    Periods: day, week, biweek, month, bimester, trimester, semester, year, custom.
+    For custom period, provide start_date and end_date as YYYY-MM-DD."""
+    from datetime import timedelta
+    target_group = "120363406870144681@g.us"
+    now = datetime.now()
+    today = now.date()
+
+    # Calculate date range based on period
+    period_map = {
+        "day": 1, "week": 7, "biweek": 15, "month": 30,
+        "bimester": 60, "trimester": 90, "semester": 180, "year": 365,
+    }
+    if period == "custom" and start_date and end_date:
+        try:
+            d_start = datetime.strptime(start_date, "%Y-%m-%d")
+            d_end = datetime.strptime(end_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
+        except ValueError:
+            return {"error": "Formato de data inválido. Use YYYY-MM-DD."}
+    elif period in period_map:
+        days = period_map[period]
+        d_start = datetime.combine(today - timedelta(days=days - 1), datetime.min.time())
+        d_end = now
+    else:
+        return {"error": f"Período inválido: {period}"}
+
+    db = SessionLocal()
+    try:
+        logs = db.query(ModerationLog).filter(
+            ModerationLog.group_id == target_group,
+            ModerationLog.timestamp >= d_start,
+            ModerationLog.timestamp <= d_end,
+        ).all()
+
+        # Aggregate per phone
+        phone_stats = {}
+        violation_types_set = set()
+        for log in logs:
+            # Extract phone from sender_id (e.g. "5511999887766@c.us" -> "5511999887766")
+            phone = str(log.sender_id).split('@')[0] if log.sender_id else "unknown"
+            if phone not in phone_stats:
+                phone_stats[phone] = {"phone": phone, "valid_ads": 0, "total_violations": 0, "violations": {}, "history": []}
+
+            action = log.action or ""
+            ts = log.timestamp.strftime("%Y-%m-%d %H:%M") if log.timestamp else ""
+
+            if action == "ok":
+                phone_stats[phone]["valid_ads"] += 1
+                phone_stats[phone]["history"].append({"date": ts, "type": "ok", "caption": (log.caption or "")[:80]})
+            else:
+                phone_stats[phone]["total_violations"] += 1
+                # Count per violation type
+                if action not in phone_stats[phone]["violations"]:
+                    phone_stats[phone]["violations"][action] = 0
+                phone_stats[phone]["violations"][action] += 1
+                violation_types_set.add(action)
+                phone_stats[phone]["history"].append({"date": ts, "type": action, "caption": (log.caption or "")[:80]})
+
+        # Sort: most active first
+        sorted_stats = sorted(phone_stats.values(), key=lambda x: x["valid_ads"] + x["total_violations"], reverse=True)
+
+        # Summary totals
+        total_valid = sum(s["valid_ads"] for s in sorted_stats)
+        total_violations = sum(s["total_violations"] for s in sorted_stats)
+
+        return {
+            "period": period,
+            "start_date": d_start.strftime("%Y-%m-%d"),
+            "end_date": d_end.strftime("%Y-%m-%d"),
+            "group_id": target_group,
+            "total_valid_ads": total_valid,
+            "total_violations": total_violations,
+            "total_users": len(sorted_stats),
+            "violation_types": sorted(list(violation_types_set)),
+            "users": sorted_stats,
+        }
+    finally:
+        db.close()
+
 # --- Managed Groups CRUD (Admin) ---
 
 # Temporary endpoint to check duplicates between groups
@@ -3933,6 +4021,7 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
         if msg_type == 'sticker' and cfg.get("sticker_filter_enabled", True):
             logger.info(f"STICKER_BLOCKED (admin): {sender_id[:20]} in {group_id[:20]}")
             await enforce_action("delete_warn", group_id, msg_id, "🚫 Stickers não são permitidos neste grupo.", sender_id=sender_id)
+            background_tasks.add_task(_save_moderation_log, group_id, sender_id, msg_type, msg_id, "", "sticker_blocked", "admin")
             return {"status": "sticker_blocked"}
 
         log_entry["status"] = "group_admin_bypass"
@@ -3953,6 +4042,7 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
         log_entry["status"] = "sticker_blocked"
         log_entry["enforce_result"] = enforce_result
         _log_webhook(log_entry)
+        background_tasks.add_task(_save_moderation_log, group_id, sender_id, msg_type, msg_id, "", "sticker_blocked", "")
         return {"status": "sticker_blocked"}
     
     # 5b. STATUS SHARE FILTER — Block shared WhatsApp status updates
@@ -3969,6 +4059,7 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
         log_entry["status"] = "status_share_blocked"
         log_entry["enforce_result"] = enforce_result
         _log_webhook(log_entry)
+        background_tasks.add_task(_save_moderation_log, group_id, sender_id, msg_type, msg_id, _all_text[:300], "status_share_blocked", "")
         return {"status": "status_share_blocked"}
     
     # 6. Link Filter — check caption only (body may be base64 for media messages)
@@ -4039,6 +4130,7 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
             log_entry["status"] = "album_blocked"
             log_entry["enforce_result"] = enforce_result
             _log_webhook(log_entry)
+            background_tasks.add_task(_save_moderation_log, group_id, sender_id, msg_type, msg_id, caption[:300], "album_blocked", f"mediaCount={msg.get('mediaCount')}")
             return {"status": "album_blocked"}
 
         # For media: use caption. For text (chat): use body directly
@@ -4061,6 +4153,7 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
             log_entry["status"] = "phone_missing"
             log_entry["enforce_result"] = enforce_result
             _log_webhook(log_entry)
+            background_tasks.add_task(_save_moderation_log, group_id, sender_id, msg_type, msg_id, str(text_to_check)[:300], "phone_missing", "")
             return {"status": "phone_missing"}
         else:
             # Message is valid — react with 🔁
