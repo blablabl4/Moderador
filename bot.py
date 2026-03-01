@@ -1267,7 +1267,7 @@ def process_flood_control(db: Session, user_id: str, group_id: str, has_media: b
 
         # Check minimum interval (window_start = time of last approved message)
         last_msg_time = stats.window_start
-        if last_msg_time:
+        if min_interval > 0 and last_msg_time:
             elapsed_min = (now - last_msg_time).total_seconds() / 60
             if elapsed_min < min_interval:
                 remaining = int(min_interval - elapsed_min)
