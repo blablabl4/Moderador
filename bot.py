@@ -3270,6 +3270,37 @@ async def api_debug_webhook_log(username: str = Depends(get_current_username)):
     """Return last 20 webhook events for debugging."""
     return {"log": _webhook_log, "total": len(_webhook_log)}
 
+@app.get("/api/debug/user-stats")
+async def api_debug_user_stats(phone: str, username: str = Depends(get_current_username)):
+    """Check flood control state for a specific phone number. Example: ?phone=5511990104568"""
+    # Normalize phone
+    phone_clean = phone.replace("+", "").replace("-", "").replace(" ", "")
+    db = SessionLocal()
+    try:
+        # Find all UserStats entries matching this phone
+        stats = db.query(UserStats).filter(UserStats.user_id.contains(phone_clean)).all()
+        stats_data = []
+        for s in stats:
+            stats_data.append({
+                "user_id": s.user_id,
+                "group_id": s.group_id,
+                "message_count": s.message_count,
+                "photo_count": s.photo_count,
+                "last_active_date": str(s.last_active_date),
+                "window_start": str(s.window_start) if s.window_start else None,
+            })
+        # Find recent webhook events for this phone
+        user_events = [e for e in _webhook_log if phone_clean in str(e.get("sender_id", ""))]
+        return {
+            "phone": phone_clean,
+            "flood_stats": stats_data,
+            "recent_events": user_events[-10:],
+            "daily_limit": cfg.get("flood_daily_limit", 1),
+            "min_interval_minutes": cfg.get("flood_min_interval_minutes", 60),
+        }
+    finally:
+        db.close()
+
 @app.post("/api/debug/reset-counters")
 async def api_debug_reset_counters(username: str = Depends(get_current_username)):
     """Reset ALL flood counters. Use when counters are out of sync."""
