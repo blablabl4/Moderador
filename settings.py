@@ -64,6 +64,9 @@ def load_settings() -> dict:
     
     # Merge: defaults + saved (saved overrides defaults)
     _settings = {**DEFAULTS, **saved}
+    # FORCE override — ensure these critical values are always correct
+    _settings["flood_daily_limit"] = 1
+    _settings["flood_min_interval_minutes"] = 0
     return _settings
 
 def save_settings(new_settings: dict) -> dict:
