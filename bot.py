@@ -1255,7 +1255,7 @@ def process_flood_control(db: Session, user_id: str, group_id: str, has_media: b
             logger.info(f"FLOOD_DAILY_RESET: user={user_id[:20]} new day={today}")
 
         daily_limit = cfg.get("flood_daily_limit", 1)
-        min_interval = cfg.get("flood_min_interval_minutes", 60)
+        min_interval = cfg.get("flood_min_interval_minutes", 0)  # disabled — daily limit handles it
         max_text = cfg.get("flood_max_text_length", 300)
 
         # Check daily limit
