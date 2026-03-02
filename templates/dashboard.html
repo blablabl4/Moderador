@@ -2434,9 +2434,44 @@
                 loadRouletteGroups();
             }
             if (tab === 'anuncios') {
+                ensureAnunciosTab();
                 loadAdTracking();
             }
         };
+
+        function ensureAnunciosTab() {
+            let el = document.getElementById('tab-anuncios');
+            if (!el) {
+                el = document.createElement('div');
+                el.id = 'tab-anuncios';
+                el.className = 'tab-content active';
+                document.querySelector('.container').appendChild(el);
+            }
+            if (!el.querySelector('#ad-period')) {
+                el.innerHTML = '<div class="card"><div class="card-title">Controle de Anuncios</div><div class="card-body">'
+                    + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:16px;">'
+                    + '<select id="ad-period" class="setting-input" style="width:auto;" onchange="onPeriodChange()">'
+                    + '<option value="day">Hoje</option><option value="week">Semana (7d)</option><option value="biweek">Quinzena (15d)</option>'
+                    + '<option value="month" selected>Mes (30d)</option><option value="bimester">Bimestre (60d)</option>'
+                    + '<option value="trimester">Trimestre (90d)</option><option value="semester">Semestre (180d)</option>'
+                    + '<option value="year">Ano (365d)</option><option value="custom">Personalizado</option></select>'
+                    + '<div id="custom-dates" style="display:none;gap:8px;align-items:center;">'
+                    + '<input type="date" id="ad-start" class="setting-input" style="width:140px;">'
+                    + '<span style="color:#888;">ate</span>'
+                    + '<input type="date" id="ad-end" class="setting-input" style="width:140px;"></div>'
+                    + '<button class="btn btn-green" style="width:auto;padding:8px 20px;" onclick="loadAdTracking()">Carregar</button></div>'
+                    + '<div id="ad-summary" style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:20px;">'
+                    + '<div class="roulette-stat"><div class="roulette-stat-value" id="ad-total-users">-</div><div class="roulette-stat-label">Anunciantes</div></div>'
+                    + '<div class="roulette-stat"><div class="roulette-stat-value" style="color:#00e676;" id="ad-total-valid">-</div><div class="roulette-stat-label">Anuncios Validos</div></div>'
+                    + '<div class="roulette-stat"><div class="roulette-stat-value" style="color:#e94560;" id="ad-total-violations">-</div><div class="roulette-stat-label">Faltas</div></div></div>'
+                    + '<div id="ad-loading" style="text-align:center;color:#888;padding:20px;">Carregando...</div>'
+                    + '<div id="ad-table-wrap" style="display:none;overflow-x:auto;">'
+                    + '<table style="width:100%;border-collapse:collapse;font-size:12px;">'
+                    + '<thead><tr id="ad-table-header" style="border-bottom:2px solid #2a2a4a;text-align:left;"></tr></thead>'
+                    + '<tbody id="ad-table-body"></tbody></table></div></div></div>';
+            }
+            el.classList.add('active');
+        }
 
         setInterval(updateStatus, 15000);
         updateStatus();
