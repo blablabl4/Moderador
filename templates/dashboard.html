@@ -1267,7 +1267,7 @@
 
 
     <!-- TAB: ROLETA -->
-    <div id="tab-roleta" class="tab-content">
+    <div id="tab-roleta" class="tab-content container" style="padding-top: 0;">
         <div class="card">
             <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
                 🎰 Roleta de Membros
@@ -1345,7 +1345,7 @@
 
     </div>
 
-    <div id="tab-anuncios" class="tab-content">
+    <div id="tab-anuncios" class="tab-content container" style="padding-top: 0;">
         <div class="card">
             <div class="card-title">📊 Controle de Anuncios</div>
             <div class="card-body">
@@ -2434,9 +2434,10 @@
             const pagDiv = document.getElementById('ad-pag-' + type);
             let pagHtml = '';
             if (totalPages > 1) {
-                pagHtml += '<button onclick="renderAdPage(\'' + type + '\', ' + (page - 1) + ')" ' + (page === 1 ? 'disabled' : '') + ' class="btn btn-outline" style="padding:4px 10px;font-size:11px;">Anterior</button>';
-                pagHtml += '<span style="padding:5px 10px; color:#888;">Pág ' + page + ' de ' + totalPages + '</span>';
-                pagHtml += '<button onclick="renderAdPage(\'' + type + '\', ' + (page + 1) + ')" ' + (page === totalPages ? 'disabled' : '') + ' class="btn btn-outline" style="padding:4px 10px;font-size:11px;">Próxima</button>';
+                const btnStyle = 'background:#1a1a2e; border:1px solid #2a2a4a; color:#a78bfa; border-radius:6px; padding:6px 16px; cursor:pointer; font-size:12px; transition:0.2s;';
+                pagHtml += '<button onclick="renderAdPage(\'' + type + '\', ' + (page - 1) + ')" ' + (page === 1 ? 'disabled style="opacity:0.5;' + btnStyle + '"' : 'style="' + btnStyle + '" onmouseover="this.style.background=\'#2a2a4a\'" onmouseout="this.style.background=\'#1a1a2e\'"') + '>Anterior</button>';
+                pagHtml += '<span style="padding:5px 15px; color:#ddd; font-weight:600; font-size:13px;">Pág ' + page + ' de ' + totalPages + '</span>';
+                pagHtml += '<button onclick="renderAdPage(\'' + type + '\', ' + (page + 1) + ')" ' + (page === totalPages ? 'disabled style="opacity:0.5;' + btnStyle + '"' : 'style="' + btnStyle + '" onmouseover="this.style.background=\'#2a2a4a\'" onmouseout="this.style.background=\'#1a1a2e\'"') + '>Próxima</button>';
             }
             pagDiv.innerHTML = pagHtml;
         }
