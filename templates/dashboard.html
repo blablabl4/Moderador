@@ -1345,57 +1345,39 @@
 
     </div>
 
-<div id="tab-anuncios" class="tab-content">
-    <div class="card">
-        <div class="card-title">📊 Controle de Anuncios</div>
-        <div class="card-body">
-            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:16px;">
-                <select id="ad-period" class="setting-input" style="width:auto;" onchange="onPeriodChange()">
-                    <option value="day">Hoje</option>
-                    <option value="week">Semana (7d)</option>
-                    <option value="biweek">Quinzena (15d)</option>
-                    <option value="month" selected>Mes (30d)</option>
-                    <option value="bimester">Bimestre (60d)</option>
-                    <option value="trimester">Trimestre (90d)</option>
-                    <option value="semester">Semestre (180d)</option>
-                    <option value="year">Ano (365d)</option>
-                    <option value="custom">Personalizado</option>
-                </select>
-                <div id="custom-dates" style="display:none;gap:8px;align-items:center;">
-                    <input type="date" id="ad-start" class="setting-input" style="width:140px;">
-                    <span style="color:#888;">ate</span>
-                    <input type="date" id="ad-end" class="setting-input" style="width:140px;">
+    <div id="tab-anuncios" class="tab-content">
+        <div class="card">
+            <div class="card-title">📊 Controle de Anuncios</div>
+            <div class="card-body">
+                <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:16px;">
+                    <select id="ad-period" class="setting-input" style="width:auto;"
+                        onchange="onPeriodChange(); if(this.value !== 'custom') loadAdTracking()">
+                        <option value="day">Hoje</option>
+                        <option value="week">Semana (7d)</option>
+                        <option value="biweek">Quinzena (15d)</option>
+                        <option value="month" selected>Mês (30d)</option>
+                        <option value="bimester">Bimestre (60d)</option>
+                        <option value="trimester">Trimestre (90d)</option>
+                        <option value="semester">Semestre (180d)</option>
+                        <option value="year">Ano (365d)</option>
+                        <option value="custom">Personalizado</option>
+                    </select>
+                    <div id="custom-dates" style="display:none;gap:8px;align-items:center;">
+                        <input type="date" id="ad-start" class="setting-input" style="width:140px;">
+                        <span style="color:#888;">até</span>
+                        <input type="date" id="ad-end" class="setting-input" style="width:140px;">
+                    </div>
+                    <button class="btn btn-green" style="width:auto;padding:8px 20px;"
+                        onclick="loadAdTracking()">Carregar</button>
                 </div>
-                <button class="btn btn-green" style="width:auto;padding:8px 20px;"
-                    onclick="loadAdTracking()">Carregar</button>
-            </div>
-            <div id="ad-summary" style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:20px;">
-                <div class="roulette-stat">
-                    <div class="roulette-stat-value" id="ad-total-users">-</div>
-                    <div class="roulette-stat-label">Anunciantes</div>
+
+                <div id="ad-loading" style="text-align:center;color:#888;padding:20px;">Selecione um período...</div>
+                <div id="ad-accordions-wrap" style="display:none; width: 100%;">
+                    <!-- Accordions inserted here via JS -->
                 </div>
-                <div class="roulette-stat">
-                    <div class="roulette-stat-value" style="color:#00e676;" id="ad-total-valid">-</div>
-                    <div class="roulette-stat-label">Anuncios Validos</div>
-                </div>
-                <div class="roulette-stat">
-                    <div class="roulette-stat-value" style="color:#e94560;" id="ad-total-violations">-</div>
-                    <div class="roulette-stat-label">Faltas</div>
-                </div>
-            </div>
-            <div id="ad-loading" style="text-align:center;color:#888;padding:20px;">Selecione um periodo e
-                clique em Carregar</div>
-            <div id="ad-table-wrap" style="display:none;overflow-x:auto;">
-                <table style="width:100%;border-collapse:collapse;font-size:12px;">
-                    <thead>
-                        <tr id="ad-table-header" style="border-bottom:2px solid #2a2a4a;text-align:left;"></tr>
-                    </thead>
-                    <tbody id="ad-table-body"></tbody>
-                </table>
             </div>
         </div>
     </div>
-</div>
 
     <!-- Participants Modal -->
     <div id="modal-overlay" class="modal-overlay" onclick="closeModal()">
@@ -2327,6 +2309,34 @@
         }
 
         // --- AD TRACKING ---
+        window.adTrackingData = { users: [], types: [], pages: {}, summary: {} };
+
+        function formatAdPhone(phone) {
+            if (!phone) return '?';
+            let p = String(phone).split('@')[0].replace(/\D/g, '');
+            if (p.length === 0) return phone;
+
+            if (p.startsWith('55') && (p.length === 12 || p.length === 13)) {
+                let ddd = p.substring(2, 4);
+                let num = p.substring(4);
+                if (num.length === 9) {
+                    return `+55 (${ddd}) ${num.substring(0, 5)}-${num.substring(5)}`;
+                } else {
+                    return `+55 (${ddd}) ${num.substring(0, 4)}-${num.substring(4)}`;
+                }
+            }
+            if (p.length === 10 || p.length === 11) {
+                let ddd = p.substring(0, 2);
+                let num = p.substring(2);
+                if (num.length === 9) {
+                    return `+55 (${ddd}) ${num.substring(0, 5)}-${num.substring(5)}`;
+                } else {
+                    return `+55 (${ddd}) ${num.substring(0, 4)}-${num.substring(4)}`;
+                }
+            }
+            return '+' + p; // fallback
+        }
+
         function onPeriodChange() {
             const v = document.getElementById('ad-period').value;
             document.getElementById('custom-dates').style.display = v === 'custom' ? 'flex' : 'none';
@@ -2343,82 +2353,146 @@
             }
             document.getElementById('ad-loading').style.display = 'block';
             document.getElementById('ad-loading').textContent = '⏳ Carregando...';
-            document.getElementById('ad-table-wrap').style.display = 'none';
+            document.getElementById('ad-accordions-wrap').style.display = 'none';
             try {
                 const res = await fetch(url);
                 const data = await res.json();
                 if (data.error) { document.getElementById('ad-loading').textContent = '❌ ' + data.error; return; }
-                document.getElementById('ad-loading').style.display = 'none';
-                document.getElementById('ad-table-wrap').style.display = 'block';
-                // Summary
-                document.getElementById('ad-total-users').textContent = data.total_users || 0;
-                document.getElementById('ad-total-valid').textContent = data.total_valid_ads || 0;
-                document.getElementById('ad-total-violations').textContent = data.total_violations || 0;
-                // Build table header
-                const vtypes = data.violation_types || [];
-                const vtypeLabels = {
-                    'phone_missing': '📵 Sem Tel',
-                    'sticker_blocked': '🎨 Sticker',
-                    'status_share_blocked': '📢 Status',
-                    'link_violation': '🔗 Link',
-                    'album_blocked': '🖼️ Álbum',
-                    'violation_daily_limit': '📅 Limite',
-                    'violation_min_interval': '⏱️ Intervalo',
-                    'violation_text_length': '📝 Texto',
-                    'violation_flood': '🌊 Flood',
+
+                window.adTrackingData.users = data.users || [];
+                window.adTrackingData.types = data.violation_types || [];
+                window.adTrackingData.pages = {};
+                window.adTrackingData.summary = {
+                    total_users: data.total_users || 0,
+                    valid_ads: data.total_valid_ads || 0,
+                    total_violations: data.total_violations || 0
                 };
-                let thHtml = '<th style="padding:8px;color:#888;">Telefone</th>';
-                thHtml += '<th style="padding:8px;color:#00e676;">✅ Válidos</th>';
-                thHtml += '<th style="padding:8px;color:#e94560;">❌ Faltas</th>';
-                vtypes.forEach(vt => {
-                    thHtml += '<th style="padding:8px;color:#f5a623;">' + (vtypeLabels[vt] || vt) + '</th>';
-                });
-                thHtml += '<th style="padding:8px;color:#888;">Histórico</th>';
-                document.getElementById('ad-table-header').innerHTML = thHtml;
-                // Build table body
-                let tbHtml = '';
-                (data.users || []).forEach((u, idx) => {
-                    const phone = u.phone || '?';
-                    const fmtPhone = phone.length >= 12 ? '+' + phone.substring(0, 2) + ' (' + phone.substring(2, 4) + ') ' + phone.substring(4, phone.length - 4) + '-' + phone.substring(phone.length - 4) : phone;
-                    const rowColor = idx % 2 === 0 ? 'rgba(255,255,255,0.02)' : 'transparent';
-                    tbHtml += '<tr style="border-bottom:1px solid #1a1a2e;background:' + rowColor + ';">';
-                    tbHtml += '<td style="padding:8px;font-weight:600;color:#a78bfa;">' + fmtPhone + '</td>';
-                    tbHtml += '<td style="padding:8px;text-align:center;color:#00e676;font-weight:700;">' + u.valid_ads + '</td>';
-                    tbHtml += '<td style="padding:8px;text-align:center;color:#e94560;font-weight:700;">' + u.total_violations + '</td>';
-                    vtypes.forEach(vt => {
-                        const count = (u.violations && u.violations[vt]) || 0;
-                        const cc = count > 0 ? 'color:#f5a623;font-weight:700;' : 'color:#444;';
-                        tbHtml += '<td style="padding:8px;text-align:center;' + cc + '">' + count + '</td>';
-                    });
-                    // History toggle
-                    tbHtml += '<td style="padding:8px;text-align:center;"><button onclick="toggleHistory(' + idx + ')" style="background:#1a1a2e;border:1px solid #2a2a4a;color:#888;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:11px;">Ver</button></td>';
-                    tbHtml += '</tr>';
-                    // Hidden history row
-                    tbHtml += '<tr id="hist-' + idx + '" style="display:none;"><td colspan="' + (3 + vtypes.length + 1) + '" style="padding:8px 16px;background:#0a0a14;">';
-                    if (u.history && u.history.length > 0) {
-                        tbHtml += '<div style="max-height:200px;overflow-y:auto;font-size:11px;">';
-                        u.history.slice().reverse().forEach(h => {
-                            const icon = h.type === 'ok' ? '✅' : '❌';
-                            const label = vtypeLabels[h.type] || h.type;
-                            tbHtml += '<div style="padding:3px 0;border-bottom:1px solid #1a1a2e;">' + icon + ' <span style="color:#f5a623;">' + h.date + '</span> — <span style="color:#ccc;">' + label + '</span> <span style="color:#666;font-size:10px;">' + (h.caption || '') + '</span></div>';
-                        });
-                        tbHtml += '</div>';
-                    } else {
-                        tbHtml += '<span style="color:#666;">Sem histórico</span>';
-                    }
-                    tbHtml += '</td></tr>';
-                });
-                document.getElementById('ad-table-body').innerHTML = tbHtml;
-                log('📊 Anúncios: ' + data.total_users + ' users, ' + data.total_valid_ads + ' válidos, ' + data.total_violations + ' faltas');
+
+                document.getElementById('ad-loading').style.display = 'none';
+                document.getElementById('ad-accordions-wrap').style.display = 'block';
+                renderAdAccordions();
             } catch (e) {
                 document.getElementById('ad-loading').textContent = '❌ Erro: ' + e;
                 document.getElementById('ad-loading').style.display = 'block';
             }
         }
 
-        function toggleHistory(idx) {
-            const row = document.getElementById('hist-' + idx);
-            row.style.display = row.style.display === 'none' ? '' : 'none';
+        function toggleAdAccordion(type) {
+            const body = document.getElementById('ad-acc-body-' + type);
+            if (body.style.display === 'none') {
+                body.style.display = 'block';
+                if (!window.adTrackingData.pages[type]) {
+                    window.adTrackingData.pages[type] = 1;
+                }
+                renderAdPage(type, window.adTrackingData.pages[type]);
+            } else {
+                body.style.display = 'none';
+            }
+        }
+
+        function getSortedUsersForType(type) {
+            let list = [];
+            window.adTrackingData.users.forEach(u => {
+                let val = 0;
+                if (type === 'valid_ads') val = u.valid_ads || 0;
+                else if (type === 'total_violations') val = u.total_violations || 0;
+                else val = (u.violations && u.violations[type]) ? u.violations[type] : 0;
+
+                if (val > 0) {
+                    list.push({ phone: u.phone, value: val });
+                }
+            });
+            return list.sort((a, b) => b.value - a.value);
+        }
+
+        function renderAdPage(type, page) {
+            window.adTrackingData.pages[type] = page;
+            const itemsPerPage = 15;
+            const list = getSortedUsersForType(type);
+            const totalPages = Math.ceil(list.length / itemsPerPage);
+
+            if (page < 1) page = 1;
+            if (page > totalPages) page = totalPages;
+
+            const tbody = document.getElementById('ad-tbody-' + type);
+            const start = (page - 1) * itemsPerPage;
+            const pageItems = list.slice(start, start + itemsPerPage);
+
+            let html = '';
+            if (pageItems.length === 0) {
+                html = '<tr><td colspan="2" style="text-align:center; padding:15px; color:#666;">Nenhum registro encontrado</td></tr>';
+            } else {
+                pageItems.forEach((item, idx) => {
+                    const bg = idx % 2 === 0 ? 'rgba(255,255,255,0.02)' : 'transparent';
+                    html += '<tr style="border-bottom:1px solid #1a1a2e; background:' + bg + ';">' +
+                        '<td style="padding:10px; color:#a78bfa; font-weight:600;">' + formatAdPhone(item.phone) + '</td>' +
+                        '<td style="padding:10px; text-align:center; font-weight:bold; color:#fff;">' + item.value + '</td></tr>';
+                });
+            }
+            tbody.innerHTML = html;
+
+            const pagDiv = document.getElementById('ad-pag-' + type);
+            let pagHtml = '';
+            if (totalPages > 1) {
+                pagHtml += '<button onclick="renderAdPage(\'' + type + '\', ' + (page - 1) + ')" ' + (page === 1 ? 'disabled' : '') + ' class="btn btn-outline" style="padding:4px 10px;font-size:11px;">Anterior</button>';
+                pagHtml += '<span style="padding:5px 10px; color:#888;">Pág ' + page + ' de ' + totalPages + '</span>';
+                pagHtml += '<button onclick="renderAdPage(\'' + type + '\', ' + (page + 1) + ')" ' + (page === totalPages ? 'disabled' : '') + ' class="btn btn-outline" style="padding:4px 10px;font-size:11px;">Próxima</button>';
+            }
+            pagDiv.innerHTML = pagHtml;
+        }
+
+        function buildAccordionHtml(id, icon, title, count, color) {
+            return '<div style="margin-bottom:12px; border:1px solid #2a2a4a; border-radius:8px; background:#121220; overflow:hidden;">' +
+                '<div onclick="toggleAdAccordion(\'' + id + '\')" style="padding:14px 20px; cursor:pointer; display:flex; justify-content:space-between; align-items:center; background:#1a1a2e; transition:0.2s;" onmouseover="this.style.background=\'#22223b\'" onmouseout="this.style.background=\'#1a1a2e\'">' +
+                '<span style="font-weight:600; font-size:14px; color:' + color + ';">' + icon + ' ' + title + '</span>' +
+                '<span style="background:rgba(255,255,255,0.05); padding:4px 12px; border-radius:12px; font-weight:700; color:#ddd;">Total: ' + count + '</span>' +
+                '</div>' +
+                '<div id="ad-acc-body-' + id + '" style="display:none; padding:0; background:#0f0f1a;">' +
+                '<table style="width:100%; border-collapse:collapse; font-size:13px;">' +
+                '<thead><tr style="border-bottom:1px solid #2a2a4a; color:#888; text-transform:uppercase; font-size:10px;"><th style="padding:10px; text-align:left;">Telefone</th><th style="padding:10px; text-align:center;">Quantidade</th></tr></thead>' +
+                '<tbody id="ad-tbody-' + id + '"></tbody></table>' +
+                '<div id="ad-pag-' + id + '" style="display:flex; justify-content:center; align-items:center; gap:10px; padding:15px;"></div>' +
+                '</div></div>';
+        }
+
+        function renderAdAccordions() {
+            const wrap = document.getElementById('ad-accordions-wrap');
+            let html = '';
+            const d = window.adTrackingData;
+
+            // Re-render generic stats visually appealing
+            html += '<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:24px;">';
+            html += '<div class="roulette-stat"><div class="roulette-stat-value" style="color:#fff;">' + d.summary.total_users + '</div><div class="roulette-stat-label">Anunciantes Únicos</div></div>';
+            html += '</div>';
+
+            html += buildAccordionHtml('valid_ads', '✅', 'Anúncios Válidos', d.summary.valid_ads, '#00e676');
+            html += buildAccordionHtml('total_violations', '❌', 'Total de Faltas', d.summary.total_violations, '#e94560');
+
+            // Individual violations
+            const vtypeLabels = {
+                'phone_missing': { i: '📵', l: 'Sem Telefone', c: '#f5a623' },
+                'sticker_blocked': { i: '🎨', l: 'Sticker Enviado', c: '#f5a623' },
+                'status_share_blocked': { i: '📢', l: 'Status/Contato Compartilhado', c: '#f5a623' },
+                'link_violation': { i: '🔗', l: 'Link Externo', c: '#f5a623' },
+                'album_blocked': { i: '🖼️', l: 'Álbum de Fotos', c: '#f5a623' },
+                'violation_daily_limit': { i: '📅', l: 'Limite Diário Excedido', c: '#f5a623' },
+                'violation_min_interval': { i: '⏱️', l: 'Intervalo Mínimo Não Respeitado', c: '#f5a623' },
+                'violation_text_length': { i: '📝', l: 'Texto Muito Curto/Longo', c: '#f5a623' },
+                'violation_flood': { i: '🌊', l: 'Flood de Mensagens', c: '#f5a623' },
+            };
+
+            d.types.forEach(vt => {
+                let totalForType = 0;
+                d.users.forEach(u => {
+                    if (u.violations && u.violations[vt]) {
+                        totalForType += u.violations[vt];
+                    }
+                });
+                const info = vtypeLabels[vt] || { i: '⚠️', l: vt, c: '#f5a623' };
+                html += buildAccordionHtml(vt, info.i, info.l, totalForType, info.c);
+            });
+
+            wrap.innerHTML = html;
         }
 
         // Override switchTab to load data when switching
@@ -2435,44 +2509,11 @@
                 loadRouletteGroups();
             }
             if (tab === 'anuncios') {
-                ensureAnunciosTab();
                 loadAdTracking();
             }
         };
 
-        function ensureAnunciosTab() {
-            let el = document.getElementById('tab-anuncios');
-            if (!el) {
-                el = document.createElement('div');
-                el.id = 'tab-anuncios';
-                el.className = 'tab-content active';
-                document.querySelector('.container').appendChild(el);
-            }
-            if (!el.querySelector('#ad-period')) {
-                el.innerHTML = '<div class="card"><div class="card-title">Controle de Anuncios</div><div class="card-body">'
-                    + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:16px;">'
-                    + '<select id="ad-period" class="setting-input" style="width:auto;" onchange="onPeriodChange()">'
-                    + '<option value="day">Hoje</option><option value="week">Semana (7d)</option><option value="biweek">Quinzena (15d)</option>'
-                    + '<option value="month" selected>Mes (30d)</option><option value="bimester">Bimestre (60d)</option>'
-                    + '<option value="trimester">Trimestre (90d)</option><option value="semester">Semestre (180d)</option>'
-                    + '<option value="year">Ano (365d)</option><option value="custom">Personalizado</option></select>'
-                    + '<div id="custom-dates" style="display:none;gap:8px;align-items:center;">'
-                    + '<input type="date" id="ad-start" class="setting-input" style="width:140px;">'
-                    + '<span style="color:#888;">ate</span>'
-                    + '<input type="date" id="ad-end" class="setting-input" style="width:140px;"></div>'
-                    + '<button class="btn btn-green" style="width:auto;padding:8px 20px;" onclick="loadAdTracking()">Carregar</button></div>'
-                    + '<div id="ad-summary" style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:20px;">'
-                    + '<div class="roulette-stat"><div class="roulette-stat-value" id="ad-total-users">-</div><div class="roulette-stat-label">Anunciantes</div></div>'
-                    + '<div class="roulette-stat"><div class="roulette-stat-value" style="color:#00e676;" id="ad-total-valid">-</div><div class="roulette-stat-label">Anuncios Validos</div></div>'
-                    + '<div class="roulette-stat"><div class="roulette-stat-value" style="color:#e94560;" id="ad-total-violations">-</div><div class="roulette-stat-label">Faltas</div></div></div>'
-                    + '<div id="ad-loading" style="text-align:center;color:#888;padding:20px;">Carregando...</div>'
-                    + '<div id="ad-table-wrap" style="display:none;overflow-x:auto;">'
-                    + '<table style="width:100%;border-collapse:collapse;font-size:12px;">'
-                    + '<thead><tr id="ad-table-header" style="border-bottom:2px solid #2a2a4a;text-align:left;"></tr></thead>'
-                    + '<tbody id="ad-table-body"></tbody></table></div></div></div>';
-            }
-            el.classList.add('active');
-        }
+
 
         setInterval(updateStatus, 15000);
         updateStatus();
