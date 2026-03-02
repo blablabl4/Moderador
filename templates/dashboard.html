@@ -1006,16 +1006,16 @@
                     <div id="settings-form" style="display:none;">
 
                         <div class="setting-group">
-                            <div class="setting-group-title">🛡️ Anti-Flood (Limites por Pessoa/Dia)</div>
+                            <div class="setting-group-title">🛡️ Geral</div>
                             <div class="setting-row">
-                                <div class="setting-label">Moderação ativa<small>Liga/desliga todo o controle de
-                                        flood</small></div>
+                                <div class="setting-label">Moderação ativa<small>Liga/desliga todo o controle do
+                                        bot</small></div>
                                 <label class="setting-toggle"><input type="checkbox" id="cfg-moderation_enabled"><span
                                         class="toggle-slider"></span></label>
                             </div>
                             <div class="setting-row">
                                 <div class="setting-label">🧪 Modo Teste (Dry-Run)<small>Loga ações sem apagar/avisar
-                                        ninguém — use para validar regras</small></div>
+                                        ninguém</small></div>
                                 <label class="setting-toggle"><input type="checkbox" id="cfg-dry_run_mode"><span
                                         class="toggle-slider"></span></label>
                             </div>
@@ -1023,18 +1023,44 @@
                                 style="display:none;background:rgba(255,200,0,0.15);border:1px solid #ffcc00;border-radius:8px;padding:8px 12px;margin-bottom:12px;color:#ffcc00;font-size:13px;text-align:center;">
                                 🧪 MODO TESTE ATIVO — Bot registra mas NÃO apaga mensagens</div>
                             <div class="setting-row">
-                                <div class="setting-label">Máximo de mensagens<small>Número de anúncios permitidos por
-                                        pessoa antes de bloquear</small></div>
+                                <div class="setting-label">🚫 Bloquear Stickers<small>Apaga stickers de não-admins nos
+                                        grupos monitorados</small></div>
+                                <label class="setting-toggle"><input type="checkbox"
+                                        id="cfg-sticker_filter_enabled"><span class="toggle-slider"></span></label>
+                            </div>
+                        </div>
+
+                        <div class="setting-group">
+                            <div class="setting-group-title">📢 Controle de Anúncios (Anti-Flood)</div>
+                            <div class="setting-row">
+                                <div class="setting-label">Limite diário de anúncios<small>Máximo de anúncios por
+                                        pessoa/dia (reset à meia-noite)</small></div>
+                                <input type="number" class="setting-input" id="cfg-flood_daily_limit" min="1" max="50">
+                            </div>
+                            <div class="setting-row">
+                                <div class="setting-label">Intervalo mínimo (minutos)<small>Tempo mínimo entre anúncios.
+                                        0 = desativado</small></div>
+                                <input type="number" class="setting-input" id="cfg-flood_min_interval_minutes" min="0"
+                                    max="1440">
+                            </div>
+                            <div class="setting-row">
+                                <div class="setting-label">Janela de flood (horas)<small>Horas antes dos contadores
+                                        resetarem por usuário</small></div>
+                                <input type="number" class="setting-input" id="cfg-flood_window_hours" min="1" max="24">
+                            </div>
+                            <div class="setting-row">
+                                <div class="setting-label">Máximo de mensagens na janela<small>Msgs permitidas dentro da
+                                        janela de flood</small></div>
                                 <input type="number" class="setting-input" id="cfg-flood_max_messages" min="1" max="50">
                             </div>
                             <div class="setting-row">
-                                <div class="setting-label">⏳ Tempo entre anúncios (minutos)<small>Após postar, o usuário
-                                        precisa esperar esse tempo para postar novamente</small></div>
+                                <div class="setting-label">⏳ Tempo entre anúncios (minutos)<small>Tempo da janela de
+                                        verificação</small></div>
                                 <input type="number" class="setting-input" id="cfg-flood_window_minutes" min="5"
                                     max="1440" step="5">
                             </div>
                             <div class="setting-row">
-                                <div class="setting-label">Máximo de fotos/mídia<small>Número de fotos permitidas por
+                                <div class="setting-label">Máximo de fotos/mídia<small>Fotos permitidas por
                                         pessoa/dia</small></div>
                                 <input type="number" class="setting-input" id="cfg-flood_max_photos" min="1" max="50">
                             </div>
@@ -1045,7 +1071,7 @@
                                     max="5000">
                             </div>
                             <div class="setting-row">
-                                <div class="setting-label">Ação ao exceder limite<small>O que fazer quando o usuário
+                                <div class="setting-label">Ação ao exceder limite<small>O que fazer quando
                                         ultrapassar</small></div>
                                 <select class="setting-input" id="cfg-flood_action" style="width:180px;">
                                     <option value="delete">Apagar mensagem</option>
@@ -1057,6 +1083,24 @@
                                 <div class="setting-label">Mensagem de aviso<small>Enviada quando o usuário excede o
                                         limite</small></div>
                                 <input type="text" class="setting-input setting-input-wide" id="cfg-warn_message">
+                            </div>
+                        </div>
+
+                        <div class="setting-group">
+                            <div class="setting-group-title">📱 Verificação de Telefone nos Anúncios</div>
+                            <div class="setting-row">
+                                <div class="setting-label">Grupos que exigem telefone<small>Selecione quais grupos
+                                        exigem número de telefone no anúncio</small></div>
+                            </div>
+                            <div id="phone-required-groups-list"
+                                style="max-height:150px;overflow-y:auto;background:rgba(0,0,0,0.2);border-radius:8px;padding:8px;margin-bottom:8px;">
+                                <div style="color:#666;padding:8px;">⏳ Carregando grupos...</div>
+                            </div>
+                            <div class="setting-row">
+                                <div class="setting-label">Emoji de aprovação<small>Reação aplicada em anúncios
+                                        aprovados (com telefone)</small></div>
+                                <input type="text" class="setting-input" id="cfg-phone_approved_emoji"
+                                    style="width:60px;font-size:20px;text-align:center;" maxlength="4">
                             </div>
                         </div>
 
@@ -1114,10 +1158,11 @@
                             </div>
                         </div>
 
-                        <div class="settings-section">
-                            <h3 style="color:#e94560;margin:0 0 12px;">🎯 Grupos Monitorados</h3>
+                        <div class="setting-group">
+                            <div class="setting-group-title">🎯 Grupos Monitorados</div>
                             <p style="color:#888;margin:0 0 10px;font-size:13px;">Selecione quais grupos serão
-                                moderados. Se nenhum for selecionado, <strong>todos</strong> os grupos serão moderados.
+                                moderados pelo bot. Se nenhum for selecionado, <strong>todos</strong> os grupos serão
+                                moderados.
                             </p>
                             <div id="monitored-groups-list"
                                 style="max-height:200px;overflow-y:auto;background:rgba(0,0,0,0.2);border-radius:8px;padding:8px;">
@@ -1135,6 +1180,16 @@
                                 <input type="text" class="setting-input setting-input-wide"
                                     id="cfg-exclusive_groups_message"
                                     placeholder="⚠️ Você já faz parte de outro grupo moderado.">
+                            </div>
+                        </div>
+
+                        <div class="setting-group">
+                            <div class="setting-group-title">📡 Broadcast / Teste</div>
+                            <div class="setting-row">
+                                <div class="setting-label">Grupo de teste<small>ID do grupo usado para testes de
+                                        broadcast (JID completo)</small></div>
+                                <input type="text" class="setting-input setting-input-wide"
+                                    id="cfg-broadcast_test_group_id" placeholder="120363424437184928@g.us">
                             </div>
                         </div>
 
@@ -1596,6 +1651,7 @@
                 // Toggles
                 document.getElementById('cfg-moderation_enabled').checked = s.moderation_enabled !== false;
                 document.getElementById('cfg-dry_run_mode').checked = s.dry_run_mode === true;
+                document.getElementById('cfg-sticker_filter_enabled').checked = s.sticker_filter_enabled !== false;
                 document.getElementById('cfg-link_filter_enabled').checked = s.link_filter_enabled !== false;
                 document.getElementById('cfg-schedule_enabled').checked = s.schedule_enabled !== false;
 
@@ -1606,6 +1662,9 @@
                 });
 
                 // Numbers
+                document.getElementById('cfg-flood_daily_limit').value = s.flood_daily_limit ?? 1;
+                document.getElementById('cfg-flood_min_interval_minutes').value = s.flood_min_interval_minutes ?? 0;
+                document.getElementById('cfg-flood_window_hours').value = s.flood_window_hours ?? 2;
                 document.getElementById('cfg-flood_max_messages').value = s.flood_max_messages || 1;
                 document.getElementById('cfg-flood_max_photos').value = s.flood_max_photos || 3;
                 document.getElementById('cfg-flood_max_text_length').value = s.flood_max_text_length || 300;
@@ -1621,16 +1680,21 @@
                 document.getElementById('cfg-warn_message').value = s.warn_message || '';
                 document.getElementById('cfg-exclusive_groups_message').value = s.exclusive_groups_message || '';
                 document.getElementById('cfg-exclusive_groups_enabled').checked = s.exclusive_groups_enabled === true;
+                document.getElementById('cfg-phone_approved_emoji').value = s.phone_approved_emoji || '🔁';
+                document.getElementById('cfg-broadcast_test_group_id').value = s.broadcast_test_group_id || '';
 
                 // Arrays as comma-separated
                 document.getElementById('cfg-whitelist_domains').value = (s.whitelist_domains || []).join(', ');
                 document.getElementById('cfg-super_admins').value = (s.super_admins || []).join(', ');
 
-                // Load monitored groups checkboxes
+                // Load groups list for both checkboxes (monitored + phone_required)
                 const monitoredGroups = s.monitored_groups || [];
+                const phoneRequiredGroups = s.phone_required_groups || [];
                 try {
                     const gRes = await fetch('/api/groups/list');
                     const gData = await gRes.json();
+
+                    // Monitored groups checkboxes
                     const container = document.getElementById('monitored-groups-list');
                     if (gData.groups && gData.groups.length > 0) {
                         container.innerHTML = gData.groups.map(g => {
@@ -1643,8 +1707,23 @@
                     } else {
                         container.innerHTML = '<div style="color:#666;padding:8px;">Nenhum grupo encontrado</div>';
                     }
+
+                    // Phone required groups checkboxes
+                    const phoneContainer = document.getElementById('phone-required-groups-list');
+                    if (gData.groups && gData.groups.length > 0) {
+                        phoneContainer.innerHTML = gData.groups.map(g => {
+                            const checked = phoneRequiredGroups.includes(g.id) ? 'checked' : '';
+                            return `<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;cursor:pointer;border-bottom:1px solid rgba(255,255,255,0.05);">
+                                <input type="checkbox" class="phone-required-group-cb" value="${g.id}" ${checked} style="accent-color:#f5a623;">
+                                <span style="color:#ccc;font-size:13px;">${g.name}</span>
+                            </label>`;
+                        }).join('');
+                    } else {
+                        phoneContainer.innerHTML = '<div style="color:#666;padding:8px;">Nenhum grupo encontrado</div>';
+                    }
                 } catch (ge) {
                     document.getElementById('monitored-groups-list').innerHTML = '<div style="color:#e94560;padding:8px;">Erro ao carregar grupos</div>';
+                    document.getElementById('phone-required-groups-list').innerHTML = '<div style="color:#e94560;padding:8px;">Erro ao carregar grupos</div>';
                 }
 
                 document.getElementById('settings-loading').style.display = 'none';
@@ -1659,8 +1738,12 @@
             const settings = {
                 moderation_enabled: document.getElementById('cfg-moderation_enabled').checked,
                 dry_run_mode: document.getElementById('cfg-dry_run_mode').checked,
+                sticker_filter_enabled: document.getElementById('cfg-sticker_filter_enabled').checked,
                 link_filter_enabled: document.getElementById('cfg-link_filter_enabled').checked,
                 schedule_enabled: document.getElementById('cfg-schedule_enabled').checked,
+                flood_daily_limit: parseInt(document.getElementById('cfg-flood_daily_limit').value) || 1,
+                flood_min_interval_minutes: parseInt(document.getElementById('cfg-flood_min_interval_minutes').value) || 0,
+                flood_window_hours: parseInt(document.getElementById('cfg-flood_window_hours').value) || 2,
                 flood_max_messages: parseInt(document.getElementById('cfg-flood_max_messages').value) || 1,
                 flood_max_photos: parseInt(document.getElementById('cfg-flood_max_photos').value) || 3,
                 flood_max_text_length: parseInt(document.getElementById('cfg-flood_max_text_length').value) || 0,
@@ -1673,6 +1756,9 @@
                 whitelist_domains: document.getElementById('cfg-whitelist_domains').value.split(',').map(s => s.trim()).filter(Boolean),
                 super_admins: document.getElementById('cfg-super_admins').value.split(',').map(s => s.trim()).filter(Boolean),
                 monitored_groups: [...document.querySelectorAll('.monitored-group-cb:checked')].map(cb => cb.value),
+                phone_required_groups: [...document.querySelectorAll('.phone-required-group-cb:checked')].map(cb => cb.value),
+                phone_approved_emoji: document.getElementById('cfg-phone_approved_emoji').value || '🔁',
+                broadcast_test_group_id: document.getElementById('cfg-broadcast_test_group_id').value,
                 exclusive_groups_enabled: document.getElementById('cfg-exclusive_groups_enabled').checked,
                 exclusive_groups_message: document.getElementById('cfg-exclusive_groups_message').value,
             };
