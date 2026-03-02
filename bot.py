@@ -2222,8 +2222,11 @@ async def api_ad_tracking(
     For custom period, provide start_date and end_date as YYYY-MM-DD."""
     from datetime import timedelta
     target_group = "120363406870144681@g.us"
-    now = datetime.now()
-    today = now.date()
+    
+    # Calculate current time in BRT (UTC-3) since database stores UTC
+    now_utc = datetime.utcnow()
+    now_brt = now_utc - timedelta(hours=3)
+    today_brt = now_brt.date()
 
     # Calculate date range based on period
     period_map = {
@@ -2232,14 +2235,19 @@ async def api_ad_tracking(
     }
     if period == "custom" and start_date and end_date:
         try:
-            d_start = datetime.strptime(start_date, "%Y-%m-%d")
-            d_end = datetime.strptime(end_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
+            d_start_brt = datetime.strptime(start_date, "%Y-%m-%d")
+            d_end_brt = datetime.strptime(end_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
+            # Shift back to UTC for query
+            d_start = d_start_brt + timedelta(hours=3)
+            d_end = d_end_brt + timedelta(hours=3)
         except ValueError:
             return {"error": "Formato de data inválido. Use YYYY-MM-DD."}
     elif period in period_map:
         days = period_map[period]
-        d_start = datetime.combine(today - timedelta(days=days - 1), datetime.min.time())
-        d_end = now
+        d_start_brt = datetime.combine(today_brt - timedelta(days=days - 1), datetime.min.time())
+        # Shift back to UTC for query
+        d_start = d_start_brt + timedelta(hours=3)
+        d_end = now_utc
     else:
         return {"error": f"Período inválido: {period}"}
 
