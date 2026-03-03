@@ -2251,6 +2251,39 @@ async def api_ad_tracking(
     else:
         return {"error": f"Período inválido: {period}"}
 
+    # Build LID→phone lookup from group participants
+    lid_to_phone = {}
+    try:
+        participants = await wpp.get_group_participants(target_group)
+        if participants:
+            for p in participants:
+                if isinstance(p, dict):
+                    p_id = p.get('id', '')
+                    if isinstance(p_id, dict):
+                        p_id = p_id.get('_serialized', '')
+                    p_id = str(p_id)
+                    # The 'user' field typically has the real phone number
+                    p_user = p.get('user', '') or ''
+                    p_serialized = p.get('_serialized', '') or ''
+                    # Extract LID key (the number before @lid)
+                    lid_key = p_id.split('@')[0] if '@lid' in p_id else ''
+                    # Extract phone from user field or @c.us serialized
+                    real_phone = ''
+                    if p_user and len(p_user) <= 15 and p_user.isdigit():
+                        real_phone = p_user
+                    elif '@c.us' in p_serialized:
+                        real_phone = p_serialized.split('@')[0]
+                    elif '@c.us' in p_id:
+                        real_phone = p_id.split('@')[0]
+                    if lid_key and real_phone:
+                        lid_to_phone[lid_key] = real_phone
+                    # Also map id directly (for @c.us entries)
+                    id_clean = p_id.split('@')[0]
+                    if id_clean and real_phone and id_clean != real_phone:
+                        lid_to_phone[id_clean] = real_phone
+    except Exception as e:
+        logger.warning(f"ad-tracking: could not resolve LID→phone: {e}")
+
     db = SessionLocal()
     try:
         logs = db.query(ModerationLog).filter(
@@ -2259,12 +2292,14 @@ async def api_ad_tracking(
             ModerationLog.timestamp <= d_end,
         ).all()
 
-        # Aggregate per phone
+        # Aggregate per phone (resolve LID→phone when possible)
         phone_stats = {}
         violation_types_set = set()
         for log in logs:
-            # Extract phone from sender_id (e.g. "5511999887766@c.us" -> "5511999887766")
-            phone = str(log.sender_id).split('@')[0] if log.sender_id else "unknown"
+            # Extract raw ID from sender_id (e.g. "254339557908550@lid" -> "254339557908550")
+            raw_id = str(log.sender_id).split('@')[0] if log.sender_id else "unknown"
+            # Try to resolve LID to real phone number
+            phone = lid_to_phone.get(raw_id, raw_id)
             if phone not in phone_stats:
                 phone_stats[phone] = {"phone": phone, "valid_ads": 0, "total_violations": 0, "violations": {}, "history": []}
 

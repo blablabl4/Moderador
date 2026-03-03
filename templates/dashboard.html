@@ -1418,12 +1418,12 @@
                         <option value="custom">Personalizado</option>
                     </select>
                     <div id="custom-dates" style="display:none;gap:8px;align-items:center;">
-                        <input type="date" id="ad-start" class="setting-input" style="width:140px;">
+                        <input type="date" id="ad-start" class="setting-input" style="width:140px;"
+                            onchange="if(document.getElementById('ad-end').value) loadAdTracking()">
                         <span style="color:#888;">até</span>
-                        <input type="date" id="ad-end" class="setting-input" style="width:140px;">
+                        <input type="date" id="ad-end" class="setting-input" style="width:140px;"
+                            onchange="if(document.getElementById('ad-start').value) loadAdTracking()">
                     </div>
-                    <button class="btn btn-green" style="width:auto;padding:8px 20px;"
-                        onclick="loadAdTracking()">Carregar</button>
                 </div>
 
                 <div id="ad-loading" style="text-align:center;color:#888;padding:20px;">Selecione um período...</div>
