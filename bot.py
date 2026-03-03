@@ -2251,38 +2251,26 @@ async def api_ad_tracking(
     else:
         return {"error": f"Período inválido: {period}"}
 
-    # Build LID→phone lookup from group participants
-    lid_to_phone = {}
-    try:
-        participants = await wpp.get_group_participants(target_group)
-        if participants:
-            for p in participants:
-                if isinstance(p, dict):
-                    p_id = p.get('id', '')
-                    if isinstance(p_id, dict):
-                        p_id = p_id.get('_serialized', '')
-                    p_id = str(p_id)
-                    # The 'user' field typically has the real phone number
-                    p_user = p.get('user', '') or ''
-                    p_serialized = p.get('_serialized', '') or ''
-                    # Extract LID key (the number before @lid)
-                    lid_key = p_id.split('@')[0] if '@lid' in p_id else ''
-                    # Extract phone from user field or @c.us serialized
-                    real_phone = ''
-                    if p_user and len(p_user) <= 15 and p_user.isdigit():
-                        real_phone = p_user
-                    elif '@c.us' in p_serialized:
-                        real_phone = p_serialized.split('@')[0]
-                    elif '@c.us' in p_id:
-                        real_phone = p_id.split('@')[0]
-                    if lid_key and real_phone:
-                        lid_to_phone[lid_key] = real_phone
-                    # Also map id directly (for @c.us entries)
-                    id_clean = p_id.split('@')[0]
-                    if id_clean and real_phone and id_clean != real_phone:
-                        lid_to_phone[id_clean] = real_phone
-    except Exception as e:
-        logger.warning(f"ad-tracking: could not resolve LID→phone: {e}")
+    # Helper: extract a BR phone number from ad text (caption)
+    _phone_extract_re = re.compile(
+        r'(?:\+?55[\s\-]?)?'       # optional country code
+        r'\(?(\d{2})\)?[\s\-]?'    # DDD (2 digits)
+        r'(\d{4,5})[\s\-]?'       # first half
+        r'(\d{4})'                 # second half
+    )
+    def _extract_br_phone(text):
+        """Extract the first BR phone from ad text. Returns '(DD) 9XXXX-XXXX' or None."""
+        if not text:
+            return None
+        m = _phone_extract_re.search(text)
+        if not m:
+            return None
+        ddd, p1, p2 = m.group(1), m.group(2), m.group(3)
+        # Normalize to 9-digit mobile (add leading 9 if 8-digit)
+        number = p1 + p2
+        if len(number) == 8:
+            number = '9' + number
+        return f"({ddd}) {number[:5]}-{number[5:]}"
 
     db = SessionLocal()
     try:
@@ -2292,13 +2280,22 @@ async def api_ad_tracking(
             ModerationLog.timestamp <= d_end,
         ).all()
 
+        # First pass: build sender_id → phone from captions of valid ads
+        lid_to_phone = {}
+        for log in logs:
+            raw_id = str(log.sender_id).split('@')[0] if log.sender_id else "unknown"
+            if raw_id not in lid_to_phone and log.caption:
+                phone = _extract_br_phone(log.caption)
+                if phone:
+                    lid_to_phone[raw_id] = phone
+
         # Aggregate per phone (resolve LID→phone when possible)
         phone_stats = {}
         violation_types_set = set()
         for log in logs:
             # Extract raw ID from sender_id (e.g. "254339557908550@lid" -> "254339557908550")
             raw_id = str(log.sender_id).split('@')[0] if log.sender_id else "unknown"
-            # Try to resolve LID to real phone number
+            # Try to resolve LID to real phone number from caption
             phone = lid_to_phone.get(raw_id, raw_id)
             if phone not in phone_stats:
                 phone_stats[phone] = {"phone": phone, "valid_ads": 0, "total_violations": 0, "violations": {}, "history": []}
