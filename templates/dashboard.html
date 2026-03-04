@@ -119,6 +119,221 @@
             }
         }
 
+        /* ======= MOBILE RESPONSIVE ======= */
+        @media (max-width: 600px) {
+
+            /* Header */
+            .header {
+                padding: 12px 0;
+                margin-bottom: 12px;
+            }
+
+            .header h1 {
+                font-size: 18px;
+            }
+
+            /* Tabs: horizontal scroll, compact */
+            .tabs {
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+                scrollbar-width: none;
+                margin-bottom: 12px;
+                gap: 0;
+                padding: 0 4px;
+            }
+
+            .tabs::-webkit-scrollbar {
+                display: none;
+            }
+
+            .tab-btn {
+                padding: 8px 10px;
+                font-size: 11px;
+                white-space: nowrap;
+                flex-shrink: 0;
+            }
+
+            /* Container */
+            .container {
+                padding: 0 10px 24px;
+            }
+
+            /* Cards */
+            .card {
+                margin-bottom: 12px;
+                border-radius: 10px;
+            }
+
+            .card-title {
+                padding: 10px 14px;
+                font-size: 13px;
+            }
+
+            .card-body {
+                padding: 12px;
+            }
+
+            /* Status rows */
+            .status-row {
+                padding: 8px 0;
+            }
+
+            .status-label,
+            .status-value {
+                font-size: 12px;
+            }
+
+            /* Buttons */
+            .btn {
+                padding: 10px 14px;
+                font-size: 12px;
+            }
+
+            /* Scan summary: 2 cols */
+            .scan-summary {
+                grid-template-columns: 1fr 1fr;
+                gap: 8px;
+                margin-bottom: 12px;
+            }
+
+            .scan-stat {
+                padding: 10px;
+            }
+
+            .scan-stat-value {
+                font-size: 20px;
+            }
+
+            .scan-stat-label {
+                font-size: 10px;
+            }
+
+            /* Checklist */
+            .checklist-item {
+                padding: 8px 10px;
+                gap: 8px;
+            }
+
+            .check-name {
+                font-size: 12px;
+            }
+
+            .check-detail {
+                font-size: 10px;
+            }
+
+            /* Group cards */
+            .group-card {
+                padding: 12px;
+                margin-bottom: 8px;
+            }
+
+            .group-name {
+                font-size: 13px;
+            }
+
+            /* Settings */
+            .setting-group {
+                margin-bottom: 16px;
+            }
+
+            .setting-group-title {
+                font-size: 12px;
+                margin-bottom: 8px;
+            }
+
+            .setting-row {
+                flex-wrap: wrap;
+                gap: 6px;
+                padding: 8px 0;
+            }
+
+            .setting-label {
+                font-size: 12px;
+                min-width: 0;
+                flex: 1 1 60%;
+            }
+
+            .setting-label small {
+                font-size: 10px;
+            }
+
+            .setting-input {
+                font-size: 12px;
+                padding: 7px 10px;
+                width: 100px;
+            }
+
+            .setting-input-wide {
+                width: 100%;
+                flex: 1 1 100%;
+            }
+
+            .btn-save {
+                width: 100%;
+                padding: 12px;
+                font-size: 14px;
+            }
+
+            /* QR */
+            .qr-wrapper img {
+                max-width: 200px;
+            }
+
+            /* Modal */
+            .modal-content {
+                width: 95%;
+                max-height: 85vh;
+                border-radius: 12px;
+            }
+
+            .modal-header {
+                padding: 12px 14px;
+            }
+
+            .participant-row {
+                padding: 8px 14px;
+            }
+
+            /* Logs */
+            .log-box {
+                padding: 8px;
+                font-size: 10px;
+                height: 130px;
+            }
+
+            /* Input row */
+            .input-row {
+                flex-direction: column;
+                gap: 6px;
+            }
+
+            .input-row .btn {
+                width: 100%;
+            }
+
+            /* Roulette */
+            .roulette-stats {
+                flex-direction: column;
+                gap: 8px !important;
+            }
+
+            /* Ad tracking / Anúncios */
+            #tab-anuncios .card-body {
+                padding: 10px;
+            }
+
+            #tab-anuncios select.setting-input {
+                width: 100%;
+            }
+
+            /* Grids */
+            .grid-2 {
+                grid-template-columns: 1fr;
+                gap: 10px;
+            }
+        }
+
         /* Status rows */
         .status-row {
             display: flex;
