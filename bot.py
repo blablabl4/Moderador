@@ -1232,7 +1232,10 @@ def process_flood_control(db: Session, user_id: str, group_id: str, has_media: b
     if not cfg.get("moderation_enabled", True):
         return {"allowed": True, "debug": "moderation_disabled"}
     try:
-        now = datetime.now()
+        # Use São Paulo timezone (UTC-3) for daily limit reference
+        from datetime import timezone
+        tz_sp = timezone(timedelta(hours=-3))
+        now = datetime.now(tz_sp)
         today = now.date()
         stats = db.query(UserStats).filter_by(user_id=user_id, group_id=group_id).first()
 
@@ -4056,14 +4059,7 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
                 _log_webhook(log_entry)
                 return {"status": "admin_broadcast_started"}
 
-        
-        # ABSOLUTE RULES: stickers and status shares blocked even for group admins
-        if msg_type == 'sticker' and cfg.get("sticker_filter_enabled", True):
-            logger.info(f"STICKER_BLOCKED (admin): {sender_id[:20]} in {group_id[:20]}")
-            await enforce_action("delete_warn", group_id, msg_id, "🚫 Stickers não são permitidos neste grupo.", sender_id=sender_id)
-            background_tasks.add_task(_save_moderation_log, group_id, sender_id, msg_type, msg_id, "", "sticker_blocked", "admin")
-            return {"status": "sticker_blocked"}
-
+        # Admins are FULLY IMMUNE to all moderation
         log_entry["status"] = "group_admin_bypass"
         _log_webhook(log_entry)
         return {"status": "group_admin_bypass"}
@@ -4089,9 +4085,8 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
     _all_text = f"{body} {caption}".strip()
     _is_status_share = (
         msg_type == 'status'
-        or 'Status de' in _all_text
+        or msg.get('isStatusV3', False)
         or ('@ Este grupo foi mencionado' in _all_text)
-        or (msg.get('isForwarded') and 'status' in str(msg.get('caption', '')).lower())
     )
     if _is_status_share:
         logger.info(f"STATUS_SHARE_BLOCKED: {sender_id[:20]} in {group_id[:20]}, type={msg_type}")
@@ -4153,16 +4148,26 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
         finally:
             db.close()
 
-    # 6c. PHONE NUMBER FILTER — ALL messages must contain phone number
-    # Apply to ALL message types (not just specific ones). Only skip if msg_type unknown.
-    _phone_types = ('image', 'video', 'media', 'album', 'chat', 'ptt', 'audio', 'document', 'vcard', 'location')
-    logger.info(f"PHONE_FILTER_DEBUG: type={msg_type} group_in_required={group_id in phone_required} caption={str(caption)[:80]} body_len={len(body)}")
-    if group_id in phone_required and (msg_type in _phone_types or msg_type not in ('sticker', 'status', 'revoked', 'e2e_notification', 'notification_template', 'gp2', 'ciphertext')):
+    # 6c. AD VALIDATION — Only image/video with phone number ≤300 chars is valid
+    logger.info(f"AD_FILTER_DEBUG: type={msg_type} group_in_required={group_id in phone_required} caption={str(caption)[:80]} body_len={len(body)}")
+    if group_id in phone_required:
+        # RULE: Only image and video are valid ad formats
+        _valid_ad_types = ('image', 'video')
+        if msg_type not in _valid_ad_types:
+            # Non-ad message types (chat, audio, ptt, vcard, location, document, etc.)
+            logger.info(f"NON_AD_TYPE_BLOCKED: {sender_id[:20]} in {group_id[:20]}, type={msg_type}")
+            enforce_result = await enforce_action("delete_warn", group_id, msg_id, "🚫 Apenas anúncios com foto ou vídeo são permitidos neste grupo.", sender_id=sender_id)
+            log_entry["status"] = "non_ad_type_blocked"
+            log_entry["enforce_result"] = enforce_result
+            _log_webhook(log_entry)
+            background_tasks.add_task(_save_moderation_log, group_id, sender_id, msg_type, msg_id, (caption or body)[:300], "non_ad_type_blocked", f"type={msg_type}")
+            return {"status": "non_ad_type_blocked"}
+
         # RULE: Multiple images (album) are NEVER allowed — always delete
         is_album = (
             msg_type == 'album'
             or msg.get('isAlbum', False)
-            or (msg.get('mediaCount', 1) or 1) > 1
+            or (msg.get('mediaCount') or 1) > 1
         )
         if is_album:
             logger.info(f"ALBUM_BLOCKED: {sender_id[:20]} in {group_id[:20]}, mediaCount={msg.get('mediaCount')}")
@@ -4173,19 +4178,16 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
             background_tasks.add_task(_save_moderation_log, group_id, sender_id, msg_type, msg_id, caption[:300], "album_blocked", f"mediaCount={msg.get('mediaCount')}")
             return {"status": "album_blocked"}
 
-        # For media: use caption. For text (chat): use body directly
-        if msg_type == 'chat':
-            text_to_check = body or ''
-        else:
-            text_to_check = (
-                msg.get('caption')
-                or msg.get('text')
-                or caption
-                or ''
-            )
-            # Ignore base64 data accidentally in caption
-            if text_to_check and len(text_to_check) > 500 and '/' in text_to_check:
-                text_to_check = ''
+        # Extract caption text for phone check (avoid base64 data)
+        text_to_check = (
+            msg.get('caption')
+            or msg.get('text')
+            or caption
+            or ''
+        )
+        # Detect actual base64 data: no spaces + very long + starts with data pattern
+        if text_to_check and len(text_to_check) > 1000 and ' ' not in text_to_check[:200]:
+            text_to_check = ''  # This is raw base64, not a caption
 
         if not has_phone_number(text_to_check):
             logger.info(f"PHONE_MISSING: {sender_id[:20]} in {group_id[:20]}, text={str(text_to_check)[:60]}")
@@ -4196,7 +4198,7 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
             background_tasks.add_task(_save_moderation_log, group_id, sender_id, msg_type, msg_id, str(text_to_check)[:300], "phone_missing", "")
             return {"status": "phone_missing"}
         else:
-            # Message is valid — react with 🔁
+            # Message is valid — react with emoji
             approved_emoji = cfg.get("phone_approved_emoji", "🔁")
             background_tasks.add_task(wpp.send_reaction, msg_id, group_id, approved_emoji)
             logger.info(f"PHONE_OK: reacted {approved_emoji} on {str(msg_id)[:30]}")
