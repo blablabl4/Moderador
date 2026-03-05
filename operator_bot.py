@@ -359,6 +359,10 @@ class ForwardEngine:
 wpp: OperatorWPPClient | None = None
 engine = ForwardEngine()
 
+# ── QR Code Cache ────────────────────────────────────────────────────────────
+# WPP Server sends QR via 'onqrcode' webhook event — we capture and store it here.
+_qr_cache: dict = {"qr": None, "updated_at": None}
+
 
 # ── FastAPI App ──────────────────────────────────────────────────────────────
 @asynccontextmanager
@@ -429,13 +433,22 @@ async def dashboard_page(request: Request):
 # ── QR Code Proxy ────────────────────────────────────────────────────────────
 @app.get("/api/qr")
 async def api_qr():
-    """Proxy the QR code from WPPConnect Server."""
-    if not wpp or not wpp.token:
+    """Return QR code — prioritise in-memory cache (captured from webhook), then poll WPP API."""
+    # 1. Serve from webhook cache (fastest, most reliable)
+    if _qr_cache.get("qr"):
+        logger.info("Serving QR from webhook cache")
+        return {"qr": _qr_cache["qr"], "status": "waiting_scan"}
+
+    # 2. Ensure we have a token
+    if not wpp:
+        return {"qr": None, "status": "not_initialized"}
+    if not wpp.token:
         try:
             await wpp.generate_token()
         except Exception:
             return {"qr": None, "status": "no_token"}
 
+    # 3. Fallback: poll WPP Server qrcode-session endpoint
     url = f"{wpp.base_url}/api/{wpp.session}/qrcode-session"
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
@@ -445,29 +458,25 @@ async def api_qr():
                 resp = await client.get(url, headers=wpp.headers)
 
             content_type = resp.headers.get("content-type", "")
-
             if resp.status_code == 200:
-                # Binary image response
                 if "image" in content_type:
                     b64 = base64.b64encode(resp.content).decode("utf-8")
                     data_uri = f"data:{content_type.split(';')[0]};base64,{b64}"
+                    _qr_cache["qr"] = data_uri  # Store in cache
                     return {"qr": data_uri, "status": "waiting_scan"}
-
-                # JSON response
                 try:
-                    data = resp.json()
-                    qr_data = data.get("qrcode") or data.get("base64Qr") or data.get("urlCode")
+                    rdata = resp.json()
+                    qr_data = rdata.get("qrcode") or rdata.get("base64Qr") or rdata.get("urlCode")
                     if qr_data:
+                        _qr_cache["qr"] = qr_data
                         return {"qr": qr_data, "status": "waiting_scan"}
-                    # Session might already be connected
-                    status = data.get("status", "no_qr")
-                    if "connected" in str(status).lower() or data.get("response") is True:
+                    wpp_status = rdata.get("status", "no_qr")
+                    if "connected" in str(wpp_status).lower():
                         return {"qr": None, "status": "connected"}
-                    return {"qr": None, "status": status}
+                    return {"qr": None, "status": wpp_status}
                 except Exception:
                     return {"qr": None, "status": "unknown_response"}
-            else:
-                return {"qr": None, "status": f"error_{resp.status_code}"}
+            return {"qr": None, "status": f"error_{resp.status_code}"}
     except Exception as e:
         logger.error(f"Error fetching QR: {e}")
         return {"qr": None, "status": "error", "detail": str(e)}
@@ -502,6 +511,29 @@ async def receive_webhook(request: Request):
 
     event = (data.get("event", "") or "").lower()
     config = get_cfg()
+
+    # ── Capture QR Code from webhook ─────────────────────────────────────
+    if event in ("onqrcode", "qrcode", "on-qr-code"):
+        response = data.get("response") or data.get("data") or {}
+        qr_value = None
+        if isinstance(response, dict):
+            qr_value = response.get("qrcode") or response.get("base64Qr") or response.get("urlCode")
+        elif isinstance(response, str) and len(response) > 10:
+            qr_value = response
+        # Also check top-level fields
+        if not qr_value:
+            qr_value = data.get("qrcode") or data.get("base64Qr") or data.get("urlCode")
+        if qr_value:
+            _qr_cache["qr"] = qr_value
+            _qr_cache["updated_at"] = datetime.utcnow().isoformat()
+            logger.info(f"QR Code captured from webhook event '{event}' ({len(str(qr_value))} chars)")
+            return {"status": "qr_captured"}
+        logger.warning(f"onqrcode event received but no QR value found: {str(data)[:200]}")
+        return {"status": "qr_empty"}
+
+    # ── Clear QR cache on connect ─────────────────────────────────────────
+    if event in ("onconnectionupdate", "onstatechange") and "connected" in str(data).lower():
+        _qr_cache["qr"] = None
 
     # ── Handle reaction events ───────────────────────────────────────────
     if event in ("onreactionmessage", "on-reaction-message", "onreaction"):
