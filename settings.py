@@ -47,6 +47,9 @@ DEFAULTS = {
     "phone_approved_emoji": "🔁",      # Emoji to react with on approved ads
     "flood_daily_limit": 1,            # Max ads per calendar day (resets at midnight)
     "flood_min_interval_minutes": 0,   # Disabled — daily limit handles everything
+    # --- Multi-bot coordination ---
+    "coordination_group_id": "",                # WhatsApp group JID for moderator↔operator coordination
+    "moderator_forward_to_coord": False,        # When True, approved ads are forwarded to coordination group
 }
 
 _settings = None

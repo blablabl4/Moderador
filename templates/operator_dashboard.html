@@ -1,0 +1,662 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Operator Bot — Painel</title>
+    <style>
+        :root {
+            --bg: #0a0e17;
+            --surface: #131a2b;
+            --surface2: #1a2340;
+            --accent: #6c5ce7;
+            --accent2: #a29bfe;
+            --green: #00e676;
+            --red: #ff5252;
+            --yellow: #ffd740;
+            --text: #e8eaf6;
+            --text-dim: #8892b0;
+            --border: #1e2d4a;
+            --radius: 12px;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+        }
+
+        /* Header */
+        .header {
+            background: linear-gradient(135deg, var(--surface) 0%, var(--surface2) 100%);
+            border-bottom: 1px solid var(--border);
+            padding: 16px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+        }
+
+        .header h1 {
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .header h1 span {
+            color: var(--accent2);
+        }
+
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .status-connected {
+            background: rgba(0, 230, 118, 0.15);
+            color: var(--green);
+        }
+
+        .status-disconnected {
+            background: rgba(255, 82, 82, 0.15);
+            color: var(--red);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+
+        .status-dot.on {
+            background: var(--green);
+            box-shadow: 0 0 8px var(--green);
+        }
+
+        .status-dot.off {
+            background: var(--red);
+        }
+
+        /* Layout */
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 24px;
+            display: grid;
+            gap: 20px;
+        }
+
+        /* Cards */
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            overflow: hidden;
+        }
+
+        .card-header {
+            padding: 14px 20px;
+            border-bottom: 1px solid var(--border);
+            font-weight: 600;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .card-body {
+            padding: 20px;
+        }
+
+        /* QR Section */
+        .qr-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .qr-container img {
+            max-width: 280px;
+            border-radius: 8px;
+            border: 2px solid var(--border);
+        }
+
+        .qr-placeholder {
+            width: 280px;
+            height: 280px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--surface2);
+            border-radius: 8px;
+            border: 2px dashed var(--border);
+            color: var(--text-dim);
+            font-size: 14px;
+            text-align: center;
+            padding: 20px;
+        }
+
+        .session-actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        /* Buttons */
+        .btn {
+            padding: 8px 18px;
+            border: none;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: var(--accent2);
+        }
+
+        .btn-danger {
+            background: var(--red);
+            color: white;
+        }
+
+        .btn-danger:hover {
+            opacity: 0.85;
+        }
+
+        .btn-success {
+            background: var(--green);
+            color: #000;
+        }
+
+        .btn-success:hover {
+            opacity: 0.85;
+        }
+
+        .btn-outline {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text-dim);
+        }
+
+        .btn-outline:hover {
+            border-color: var(--accent);
+            color: var(--text);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 12px;
+        }
+
+        .stat-card {
+            background: var(--surface2);
+            border-radius: 8px;
+            padding: 14px;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 28px;
+            font-weight: 700;
+            color: var(--accent2);
+        }
+
+        .stat-value.green {
+            color: var(--green);
+        }
+
+        .stat-value.red {
+            color: var(--red);
+        }
+
+        .stat-value.yellow {
+            color: var(--yellow);
+        }
+
+        .stat-label {
+            font-size: 11px;
+            color: var(--text-dim);
+            margin-top: 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        /* Config Form */
+        .config-form {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+
+        .field {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .field label {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .field input,
+        .field textarea {
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 10px 14px;
+            color: var(--text);
+            font-size: 14px;
+            font-family: 'Consolas', 'Courier New', monospace;
+        }
+
+        .field input:focus,
+        .field textarea:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        .field textarea {
+            resize: vertical;
+            min-height: 80px;
+        }
+
+        .field .hint {
+            font-size: 11px;
+            color: var(--text-dim);
+            margin-top: 2px;
+        }
+
+        /* Log */
+        .log-area {
+            background: #0d1117;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 12px;
+            font-family: 'Consolas', monospace;
+            font-size: 12px;
+            max-height: 260px;
+            overflow-y: auto;
+            color: var(--text-dim);
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        .log-area .ok {
+            color: var(--green);
+        }
+
+        .log-area .err {
+            color: var(--red);
+        }
+
+        .log-area .info {
+            color: var(--accent2);
+        }
+
+        /* Toast */
+        .toast {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            z-index: 1000;
+            opacity: 0;
+            transform: translateY(20px);
+            transition: all 0.3s;
+        }
+
+        .toast.show {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .toast.success {
+            background: var(--green);
+            color: #000;
+        }
+
+        .toast.error {
+            background: var(--red);
+            color: white;
+        }
+
+        /* Two column layout */
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        @media (max-width: 700px) {
+            .grid-2 {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="header">
+        <h1>🤖 Operator Bot — <span id="sessionName">...</span></h1>
+        <div id="statusBadge" class="status-badge status-disconnected">
+            <div class="status-dot off" id="statusDot"></div>
+            <span id="statusText">Desconectado</span>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- Session & QR -->
+        <div class="grid-2">
+            <div class="card">
+                <div class="card-header">📱 Sessão WhatsApp</div>
+                <div class="card-body">
+                    <div class="qr-container">
+                        <div id="qrArea" class="qr-placeholder">
+                            Clique "Iniciar Sessão" para gerar o QR Code
+                        </div>
+                        <div class="session-actions">
+                            <button class="btn btn-primary" onclick="startSession()">▶ Iniciar Sessão</button>
+                            <button class="btn btn-outline" onclick="fetchQR()">🔄 Atualizar QR</button>
+                            <button class="btn btn-danger" onclick="reconnect()">⚡ Reconectar</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">📊 Estatísticas</div>
+                <div class="card-body">
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-value green" id="statForwarded">0</div>
+                            <div class="stat-label">Encaminhados</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value red" id="statFailed">0</div>
+                            <div class="stat-label">Falhas</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="statAdsDetected">0</div>
+                            <div class="stat-label">Anúncios Detectados</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value yellow" id="statPerHour">0</div>
+                            <div class="stat-label">Esta Hora</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="statSkipped">0</div>
+                            <div class="stat-label">Ignorados</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="statTargets">0</div>
+                            <div class="stat-label">Grupos Destino</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Config -->
+        <div class="card">
+            <div class="card-header">
+                ⚙️ Configuração
+                <button class="btn btn-success" onclick="saveConfig()">💾 Salvar</button>
+            </div>
+            <div class="card-body">
+                <div class="config-form">
+                    <div class="grid-2">
+                        <div class="field">
+                            <label>Grupos Monitorados (anunciantes)</label>
+                            <textarea id="cfgMonitoredGroups"
+                                placeholder="Um JID por linha&#10;120363406870144681@g.us"></textarea>
+                            <div class="hint">Grupos onde o moderador está. Um JID por linha.</div>
+                        </div>
+                        <div class="field">
+                            <label>Grupos Destino (encaminhar para)</label>
+                            <textarea id="cfgTargetGroups"
+                                placeholder="Um JID por linha&#10;120363408281153077@g.us"></textarea>
+                            <div class="hint">Grupos que vão receber os anúncios. Controle o volume aqui.</div>
+                        </div>
+                    </div>
+                    <div class="grid-2">
+                        <div class="field">
+                            <label>IDs dos Bots Moderadores</label>
+                            <input type="text" id="cfgModeratorIds" placeholder="5511983426767,5511981771974">
+                            <div class="hint">Telefones dos moderadores, separados por vírgula.</div>
+                        </div>
+                        <div class="field">
+                            <label>Emoji Aprovação</label>
+                            <input type="text" id="cfgEmoji" placeholder="🔁" style="width: 80px;">
+                        </div>
+                    </div>
+                    <div class="grid-2">
+                        <div class="field">
+                            <label>Delay entre Forwards (segundos)</label>
+                            <input type="number" id="cfgDelay" placeholder="0" min="0">
+                            <div class="hint">0 = sem delay (modo teste)</div>
+                        </div>
+                        <div class="field">
+                            <label>Máximo Forwards / Hora</label>
+                            <input type="number" id="cfgMaxPerHour" placeholder="0" min="0">
+                            <div class="hint">0 = ilimitado (modo teste)</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Activity Log -->
+        <div class="card">
+            <div class="card-header">
+                📋 Log de Atividade
+                <button class="btn btn-outline" onclick="clearLog()">Limpar</button>
+            </div>
+            <div class="card-body">
+                <div class="log-area" id="logArea">Aguardando atividade...\n</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script>
+        const BASE = window.location.origin;
+        let pollInterval = null;
+
+        // ── Toast ───────────────────────────────────────────────────────
+        function showToast(msg, type = 'success') {
+            const t = document.getElementById('toast');
+            t.textContent = msg;
+            t.className = `toast ${type} show`;
+            setTimeout(() => t.classList.remove('show'), 3000);
+        }
+
+        // ── Log ─────────────────────────────────────────────────────────
+        function addLog(msg, cls = '') {
+            const log = document.getElementById('logArea');
+            const time = new Date().toLocaleTimeString('pt-BR');
+            const span = cls ? `<span class="${cls}">${msg}</span>` : msg;
+            log.innerHTML += `[${time}] ${span}\n`;
+            log.scrollTop = log.scrollHeight;
+        }
+        function clearLog() {
+            document.getElementById('logArea').innerHTML = '';
+        }
+
+        // ── Fetch helpers ───────────────────────────────────────────────
+        async function api(url, opts = {}) {
+            try {
+                const res = await fetch(BASE + url, opts);
+                return await res.json();
+            } catch (e) {
+                addLog(`Erro: ${e.message}`, 'err');
+                return null;
+            }
+        }
+
+        // ── Health / Stats Polling ──────────────────────────────────────
+        async function pollHealth() {
+            const data = await api('/health');
+            if (!data) return;
+
+            document.getElementById('sessionName').textContent = data.session || '?';
+
+            const badge = document.getElementById('statusBadge');
+            const dot = document.getElementById('statusDot');
+            const txt = document.getElementById('statusText');
+            if (data.connected) {
+                badge.className = 'status-badge status-connected';
+                dot.className = 'status-dot on';
+                txt.textContent = 'Conectado';
+            } else {
+                badge.className = 'status-badge status-disconnected';
+                dot.className = 'status-dot off';
+                txt.textContent = 'Desconectado';
+            }
+
+            const eng = data.engine || {};
+            document.getElementById('statForwarded').textContent = eng.total_forwarded || 0;
+            document.getElementById('statFailed').textContent = eng.total_failed || 0;
+            document.getElementById('statAdsDetected').textContent = eng.total_ads_detected || 0;
+            document.getElementById('statPerHour').textContent = eng.forwards_this_hour || 0;
+            document.getElementById('statSkipped').textContent = eng.total_skipped_not_media || 0;
+            document.getElementById('statTargets').textContent = data.target_groups || 0;
+        }
+
+        // ── QR Code ─────────────────────────────────────────────────────
+        async function fetchQR() {
+            addLog('Buscando QR Code...', 'info');
+            const data = await api('/api/qr');
+            const area = document.getElementById('qrArea');
+            if (data && data.qr) {
+                area.innerHTML = `<img src="${data.qr}" alt="QR Code">`;
+                addLog('QR Code carregado — escaneie com WhatsApp!', 'ok');
+            } else if (data && data.status === 'connected') {
+                area.innerHTML = '<div class="qr-placeholder" style="color:var(--green)">✅ Sessão já conectada!</div>';
+                addLog('Sessão já conectada!', 'ok');
+            } else {
+                area.innerHTML = `<div class="qr-placeholder">Status: ${data?.status || 'erro'}<br>Tente "Iniciar Sessão"</div>`;
+                addLog(`QR status: ${data?.status || 'erro'}`, 'err');
+            }
+        }
+
+        async function startSession() {
+            addLog('Iniciando sessão...', 'info');
+            const data = await api('/api/session/start', { method: 'POST' });
+            if (data) {
+                showToast(data.message || 'Sessão iniciada!');
+                addLog(data.message || 'Sessão iniciada', 'ok');
+                // Poll for QR after a short delay
+                setTimeout(fetchQR, 2000);
+            }
+        }
+
+        async function reconnect() {
+            addLog('Reconectando...', 'info');
+            const data = await api('/reconnect', { method: 'POST' });
+            if (data) {
+                showToast('Reconexão iniciada');
+                addLog('Reconexão iniciada', 'ok');
+                setTimeout(pollHealth, 3000);
+            }
+        }
+
+        // ── Config ──────────────────────────────────────────────────────
+        async function loadConfig() {
+            const data = await api('/config');
+            if (!data) return;
+
+            document.getElementById('cfgMonitoredGroups').value =
+                (data.monitored_groups || []).join('\n');
+            document.getElementById('cfgTargetGroups').value =
+                (data.target_groups || []).join('\n');
+            document.getElementById('cfgModeratorIds').value =
+                (data.moderator_bot_ids || []).join(',');
+            document.getElementById('cfgEmoji').value = data.approved_emoji || '🔁';
+            document.getElementById('cfgDelay').value = data.forward_delay_seconds ?? 0;
+            document.getElementById('cfgMaxPerHour').value = data.max_forwards_per_hour ?? 0;
+        }
+
+        async function saveConfig() {
+            const monGroups = document.getElementById('cfgMonitoredGroups').value
+                .split('\n').map(s => s.trim()).filter(Boolean);
+            const tgtGroups = document.getElementById('cfgTargetGroups').value
+                .split('\n').map(s => s.trim()).filter(Boolean);
+            const modIds = document.getElementById('cfgModeratorIds').value
+                .split(',').map(s => s.trim()).filter(Boolean);
+            const emoji = document.getElementById('cfgEmoji').value.trim() || '🔁';
+            const delay = parseInt(document.getElementById('cfgDelay').value) || 0;
+            const maxH = parseInt(document.getElementById('cfgMaxPerHour').value) || 0;
+
+            const payload = {
+                monitored_groups: monGroups,
+                target_groups: tgtGroups,
+                moderator_bot_ids: modIds,
+                approved_emoji: emoji,
+                forward_delay_seconds: delay,
+                max_forwards_per_hour: maxH,
+            };
+
+            const data = await api('/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+
+            if (data && data.status === 'ok') {
+                showToast('✅ Configuração salva!');
+                addLog('Configuração salva com sucesso', 'ok');
+            } else {
+                showToast('❌ Erro ao salvar', 'error');
+                addLog(`Erro ao salvar: ${data?.message || '?'}`, 'err');
+            }
+        }
+
+        // ── Init ────────────────────────────────────────────────────────
+        document.addEventListener('DOMContentLoaded', () => {
+            loadConfig();
+            pollHealth();
+            pollInterval = setInterval(pollHealth, 5000);
+        });
+    </script>
+</body>
+
+</html>

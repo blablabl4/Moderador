@@ -1,0 +1,16 @@
+{
+    "wpp_server_url": "http://localhost:21465",
+    "session_name": "operator_1",
+    "wpp_secret_key": "THISISMYSECURETOKEN",
+    "monitored_groups": [
+        "120363406870144681@g.us"
+    ],
+    "moderator_bot_ids": [
+        "5511983426767"
+    ],
+    "approved_emoji": "🔁",
+    "target_groups": [],
+    "forward_delay_seconds": 0,
+    "max_forwards_per_hour": 0,
+    "port": 8001
+}

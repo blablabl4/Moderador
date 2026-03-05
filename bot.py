@@ -3310,6 +3310,76 @@ async def get_group_admin_ids(group_id: str) -> set:
     _group_admin_cache[group_id] = {"ids": admin_ids, "time": now}
     return admin_ids
 
+# --- MULTI-BOT: Forward approved ads to coordination group ---
+async def forward_to_coordination(msg_id, origin_group_id: str):
+    """Forward an approved ad to the coordination group so operator bots can
+    pick it up and redistribute.  Uses forward-messages (preserves media quality).
+    Only runs when moderator_forward_to_coord is True and coordination_group_id is set."""
+    cfg = load_settings()
+    coord_group = cfg.get("coordination_group_id", "")
+    if not coord_group:
+        return
+
+    try:
+        await ensure_token()
+
+        # Resolve the _serialized message ID from chat history
+        real_msg_id = None
+        stanza_id = None
+
+        # msg_id can be a dict {"_serialized": "...", "id": "..."} or a plain string
+        if isinstance(msg_id, dict):
+            real_msg_id = msg_id.get('_serialized', '')
+            stanza_id = msg_id.get('id', '') or msg_id.get('_serialized', '')
+        elif isinstance(msg_id, str):
+            real_msg_id = msg_id
+            # Extract stanza part (last segment after 2nd underscore)
+            parts = msg_id.split('_', 2)
+            stanza_id = parts[2] if len(parts) == 3 else msg_id
+
+        # If we don't have a full _serialized ID, search chat history
+        if not real_msg_id or '_' not in str(real_msg_id):
+            try:
+                messages = await wpp.get_messages(origin_group_id, count=50)
+                for m in (messages or []):
+                    m_id = m.get('id', {})
+                    if isinstance(m_id, dict):
+                        ser = m_id.get('_serialized', '')
+                        mid_parts = ser.split('_', 2)
+                        if len(mid_parts) == 3 and stanza_id and mid_parts[2] == stanza_id:
+                            real_msg_id = ser
+                            break
+            except Exception as e:
+                logger.warning(f"COORD_FWD: get_messages lookup error: {e}")
+
+        if not real_msg_id:
+            logger.warning(f"COORD_FWD: could not resolve msg_id for forwarding")
+            return
+
+        # Small random delay to look human
+        await asyncio.sleep(random.uniform(2.0, 5.0))
+
+        # Forward using native forward-messages (preserves image quality)
+        fwd_url = f"{wpp.base_url}/api/{wpp.session}/forward-messages"
+        payload = {
+            "phone": coord_group,
+            "messageId": real_msg_id,
+            "isGroup": True,
+        }
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(fwd_url, json=payload, headers=wpp.headers)
+
+        if resp.status_code in (200, 201):
+            body = resp.json() if resp.text else {}
+            if body.get("status") != "error":
+                logger.info(f"COORD_FWD: ✅ forwarded to coordination group {coord_group[:25]}")
+                return
+
+        logger.warning(f"COORD_FWD: ❌ forward failed: {resp.status_code} - {resp.text[:200]}")
+    except Exception as e:
+        logger.error(f"COORD_FWD: error: {e}")
+
+
 # --- WEBHOOK ---
 # Debug: store last 20 webhook events for inspection
 _webhook_log = []
@@ -4202,6 +4272,8 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
             approved_emoji = cfg.get("phone_approved_emoji", "🔁")
             background_tasks.add_task(wpp.send_reaction, msg_id, group_id, approved_emoji)
             logger.info(f"PHONE_OK: reacted {approved_emoji} on {str(msg_id)[:30]}")
+            # NOTE: Operator bots (in the same group) detect this reaction via
+            # onreactionmessage webhook and auto-forward to their target groups.
 
     log_entry["status"] = "ok"
     _log_webhook(log_entry)
