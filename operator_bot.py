@@ -135,12 +135,15 @@ class OperatorWPPClient:
         logger.error(f"Failed to generate token: {resp.status_code}")
         return False
 
-    async def start_session(self):
+    async def start_session(self, webhook_url: str = ""):
         if not self.token:
             await self.generate_token()
         url = f"{self.base_url}/api/{self.session}/start-session"
+        payload = {"waitQrCode": False}
+        if webhook_url:
+            payload["webhook"] = webhook_url
         async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(url, headers=self.headers)
+            resp = await client.post(url, json=payload, headers=self.headers)
             logger.info(f"Start session: {resp.status_code} - {resp.text[:200]}")
             return resp.status_code in (200, 201)
 
@@ -385,10 +388,15 @@ async def lifespan(app: FastAPI):
 
     try:
         await wpp.generate_token()
-        await wpp.start_session()
 
         port = config.get("port", 8001)
-        webhook_url = os.environ.get("OPERATOR_WEBHOOK_URL", f"http://localhost:{port}/webhook")
+        webhook_url = os.environ.get(
+            "OPERATOR_WEBHOOK_URL",
+            f"http://victorious-transformation.railway.internal:{port}/webhook"
+        )
+        logger.info(f"  Webhook URL: {webhook_url}")
+
+        await wpp.start_session(webhook_url=webhook_url)
         await wpp.subscribe_webhook(webhook_url)
     except Exception as e:
         logger.error(f"Startup error: {e}")
@@ -463,7 +471,13 @@ async def api_qr():
 async def api_session_start():
     """Start or restart the WPP session to generate a new QR code."""
     if wpp:
-        await wpp.start_session()
+        config = get_cfg()
+        port = config.get("port", 8001)
+        webhook_url = os.environ.get(
+            "OPERATOR_WEBHOOK_URL",
+            f"http://victorious-transformation.railway.internal:{port}/webhook"
+        )
+        await wpp.start_session(webhook_url=webhook_url)
         return {"status": "success", "message": "Sessão iniciada! Aguarde o QR Code."}
     return {"status": "error", "message": "WPP client not initialized"}
 
