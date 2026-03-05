@@ -43,8 +43,8 @@ logger = logging.getLogger("operator")
 CONFIG_FILE = os.environ.get("OPERATOR_CONFIG", "./operator_config.json")
 
 DEFAULTS = {
-    # WPPConnect Server connection
-    "wpp_server_url": os.environ.get("WPP_SERVER_URL", "http://localhost:21465"),
+    # WPPConnect Server connection (Railway internal URL by default)
+    "wpp_server_url": os.environ.get("WPP_SERVER_URL", "http://server-cli.railway.internal:8080"),
     "session_name": os.environ.get("OPERATOR_SESSION", "operator_1"),
     "wpp_secret_key": os.environ.get("WPP_SECRET_KEY", "THISISMYSECURETOKEN"),
 
@@ -64,8 +64,8 @@ DEFAULTS = {
     "forward_delay_seconds": 0,           # 0 = no delay (testing mode)
     "max_forwards_per_hour": 0,           # 0 = unlimited (testing mode)
 
-    # Server
-    "port": 8001,
+    # Server — Railway sets PORT automatically
+    "port": int(os.environ.get("PORT", 8001)),
 }
 
 _config = None

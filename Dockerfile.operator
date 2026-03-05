@@ -1,0 +1,17 @@
+FROM python:3.10-slim
+
+WORKDIR /app
+
+# Data directory for persistence
+RUN mkdir -p /data
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+# Railway sets PORT automatically
+EXPOSE 8001
+
+# Run the operator bot
+CMD ["python", "operator_bot.py"]
