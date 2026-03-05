@@ -153,6 +153,16 @@ class OperatorWPPClient:
             logger.info(f"Start session: {resp.status_code} - {resp.text[:300]}")
             return resp.status_code in (200, 201)
 
+    async def close_session(self):
+        """Close/kill existing session to release the browser lock."""
+        url = f"{self.base_url}/api/{self.session}/close-session"
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.post(url, headers=self.headers)
+                logger.info(f"Close session: {resp.status_code} - {resp.text[:100]}")
+        except Exception as e:
+            logger.warning(f"Close session error (non-fatal): {e}")
+
     async def subscribe_webhook(self, webhook_url: str):
         url = f"{self.base_url}/api/{self.session}/subscribe"
         for payload in [
@@ -492,6 +502,12 @@ async def api_session_start():
             "OPERATOR_WEBHOOK_URL",
             f"http://victorious-transformation.railway.internal:{port}/webhook"
         )
+        # Clear cached QR before starting fresh
+        _qr_cache["qr"] = None
+        # Close any existing session first (releases browser lock)
+        await wpp.close_session()
+        await asyncio.sleep(1)  # give Chrome time to fully exit
+        await wpp.generate_token()
         await wpp.start_session(webhook_url=webhook_url)
         return {"status": "success", "message": "Sessão iniciada! Aguarde o QR Code."}
     return {"status": "error", "message": "WPP client not initialized"}

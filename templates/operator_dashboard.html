@@ -699,8 +699,8 @@
             loadConfig();
             pollHealth();
             pollInterval = setInterval(pollHealth, 5000);
-            // Auto-start QR polling on page load
-            startQRPoll();
+            // NOTE: Session must be started manually via "Iniciar Sessão" button
+            // Auto-start was causing race conditions (browser already running error)
         });
     </script>
 </body>
