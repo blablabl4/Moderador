@@ -500,6 +500,9 @@
     <script>
         const BASE = window.location.origin;
         let pollInterval = null;
+        let qrPollTimer = null;
+        let qrPollCount = 0;
+        const QR_POLL_MAX = 20; // 20 x 3s = 60s max
 
         // ── Toast ───────────────────────────────────────────────────────
         function showToast(msg, type = 'success') {
@@ -546,6 +549,7 @@
                 badge.className = 'status-badge status-connected';
                 dot.className = 'status-dot on';
                 txt.textContent = 'Conectado';
+                stopQRPoll(); // stop polling if connected
             } else {
                 badge.className = 'status-badge status-disconnected';
                 dot.className = 'status-dot off';
@@ -562,6 +566,44 @@
         }
 
         // ── QR Code ─────────────────────────────────────────────────────
+        function stopQRPoll() {
+            if (qrPollTimer) {
+                clearInterval(qrPollTimer);
+                qrPollTimer = null;
+            }
+            qrPollCount = 0;
+        }
+
+        function startQRPoll() {
+            stopQRPoll();
+            qrPollCount = 0;
+            const area = document.getElementById('qrArea');
+            area.innerHTML = '<div class="qr-placeholder" style="color:var(--yellow)">⏳ Aguardando QR Code...<br><small>Buscando automaticamente...</small></div>';
+            qrPollTimer = setInterval(async () => {
+                qrPollCount++;
+                if (qrPollCount > QR_POLL_MAX) {
+                    stopQRPoll();
+                    addLog('Timeout — QR Code não gerado em 60s', 'err');
+                    area.innerHTML = '<div class="qr-placeholder">Timeout — tente "Iniciar Sessão" novamente</div>';
+                    return;
+                }
+                addLog(`Buscando QR Code... (tentativa ${qrPollCount})`, 'info');
+                const data = await api('/api/qr');
+                if (data && data.qr) {
+                    area.innerHTML = `<img src="${data.qr}" alt="QR Code">`;
+                    addLog('✅ QR Code carregado — escaneie com WhatsApp!', 'ok');
+                    showToast('QR Code pronto! Escaneie agora.');
+                    stopQRPoll();
+                } else if (data && data.status === 'connected') {
+                    area.innerHTML = '<div class="qr-placeholder" style="color:var(--green)">✅ Sessão já conectada!</div>';
+                    addLog('Sessão já conectada!', 'ok');
+                    stopQRPoll();
+                } else {
+                    area.innerHTML = `<div class="qr-placeholder" style="color:var(--yellow)">⏳ ${data?.status || 'aguardando'}...<br><small>Tentativa ${qrPollCount}/${QR_POLL_MAX}</small></div>`;
+                }
+            }, 3000);
+        }
+
         async function fetchQR() {
             addLog('Buscando QR Code...', 'info');
             const data = await api('/api/qr');
@@ -569,9 +611,11 @@
             if (data && data.qr) {
                 area.innerHTML = `<img src="${data.qr}" alt="QR Code">`;
                 addLog('QR Code carregado — escaneie com WhatsApp!', 'ok');
+                stopQRPoll();
             } else if (data && data.status === 'connected') {
                 area.innerHTML = '<div class="qr-placeholder" style="color:var(--green)">✅ Sessão já conectada!</div>';
                 addLog('Sessão já conectada!', 'ok');
+                stopQRPoll();
             } else {
                 area.innerHTML = `<div class="qr-placeholder">Status: ${data?.status || 'erro'}<br>Tente "Iniciar Sessão"</div>`;
                 addLog(`QR status: ${data?.status || 'erro'}`, 'err');
@@ -584,8 +628,8 @@
             if (data) {
                 showToast(data.message || 'Sessão iniciada!');
                 addLog(data.message || 'Sessão iniciada', 'ok');
-                // Poll for QR after a short delay
-                setTimeout(fetchQR, 2000);
+                // Start auto-polling for QR code
+                startQRPoll();
             }
         }
 
@@ -595,7 +639,7 @@
             if (data) {
                 showToast('Reconexão iniciada');
                 addLog('Reconexão iniciada', 'ok');
-                setTimeout(pollHealth, 3000);
+                startQRPoll();
             }
         }
 
@@ -655,6 +699,8 @@
             loadConfig();
             pollHealth();
             pollInterval = setInterval(pollHealth, 5000);
+            // Auto-start QR polling on page load
+            startQRPoll();
         });
     </script>
 </body>
