@@ -4255,7 +4255,15 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
             or caption
             or ''
         )
-        # Detect actual base64 data: no spaces + very long + starts with data pattern
+        # Fallback: if caption fields are empty, try body (WPP sometimes stores caption there)
+        # but only if body looks like real text (not base64 image data)
+        if not text_to_check and body:
+            # base64 data is typically >1000 chars with no spaces in the first 200 chars
+            is_likely_base64 = (len(body) > 1000 and ' ' not in body[:200])
+            if not is_likely_base64:
+                text_to_check = body
+
+        # Final safety: detect actual base64 data that slipped through
         if text_to_check and len(text_to_check) > 1000 and ' ' not in text_to_check[:200]:
             text_to_check = ''  # This is raw base64, not a caption
 
