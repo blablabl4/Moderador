@@ -137,21 +137,23 @@ class OperatorWPPClient:
 
     async def start_session(self, webhook_url: str = ""):
         if not self.token:
-            await self.generate_token()
+            ok = await self.generate_token()
+            if not ok:
+                logger.error("Cannot start session without a valid token.")
+                return False
         url = f"{self.base_url}/api/{self.session}/start-session"
-        payload = {
-            "waitQrCode": True,
-            "createOptions": {
-                "autoClose": 0,         # Disable auto-close (was killing session after 60s)
-                "headless": True,
-            }
-        }
+        payload = {"waitQrCode": False}  # Same as working moderator bot
         if webhook_url:
             payload["webhook"] = webhook_url
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            resp = await client.post(url, json=payload, headers=self.headers)
-            logger.info(f"Start session: {resp.status_code} - {resp.text[:300]}")
-            return resp.status_code in (200, 201)
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            try:
+                resp = await client.post(url, json=payload, headers=self.headers)
+                logger.info(f"Start session: {resp.status_code} - {resp.text[:300]}")
+                return resp.status_code in (200, 201)
+            except Exception as e:
+                logger.error(f"Error starting session: {e}")
+                return False
+
 
     async def close_session(self):
         """Close/kill existing session to release the browser lock."""
