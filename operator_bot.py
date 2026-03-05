@@ -43,8 +43,8 @@ logger = logging.getLogger("operator")
 CONFIG_FILE = os.environ.get("OPERATOR_CONFIG", "./operator_config.json")
 
 DEFAULTS = {
-    # WPPConnect Server connection (Railway internal URL by default)
-    "wpp_server_url": os.environ.get("WPP_SERVER_URL", "http://server-cli.railway.internal:8080"),
+    # WPPConnect Server connection (dedicated operator WPP server on Railway)
+    "wpp_server_url": os.environ.get("WPP_SERVER_URL", "http://server-cli-operator.railway.internal:8080"),
     "session_name": os.environ.get("OPERATOR_SESSION", "operator_1"),
     "wpp_secret_key": os.environ.get("WPP_SECRET_KEY", "THISISMYSECURETOKEN"),
 
