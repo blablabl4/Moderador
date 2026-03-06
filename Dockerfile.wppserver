@@ -22,9 +22,6 @@ RUN apt-get update && apt-get install -y git --no-install-recommends && \
     apt-get remove -y git && apt-get autoremove -y && \
     rm -rf /var/lib/apt/lists/*
 
-# Volume for session persistence
-VOLUME ["/usr/src/wpp-server/userDataDir"]
-
 EXPOSE 8080
 
 CMD ["node", "dist/server.js"]
