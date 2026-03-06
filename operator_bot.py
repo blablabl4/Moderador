@@ -185,7 +185,7 @@ class OperatorWPPClient:
 
         webhook_url = os.environ.get(
             "OPERATOR_WEBHOOK_URL",
-            "http://victorious-transformation.railway.internal:8001/webhook"
+            "https://victorious-transformation-moderador.up.railway.app/webhook"
         )
         url = f"{self.base_url}/api/{self.session}/start-session"
         async with httpx.AsyncClient(timeout=30) as client:
@@ -195,7 +195,7 @@ class OperatorWPPClient:
                     "waitQrCode": False
                 }, headers=self.headers)
                 logger.info(f"Start Session: {resp.status_code} - {resp.text[:300]}")
-                logger.info(f"WEBHOOK URL sent to WPP: {webhook_url}")
+                logger.info(f"📨 WEBHOOK URL sent to WPP: {webhook_url}")
             except Exception as e:
                 logger.error(f"Error starting session: {e}")
 
