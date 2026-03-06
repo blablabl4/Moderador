@@ -693,12 +693,13 @@
             addLog(`${action} sessão '${name}'...`, 'info');
 
             if (action === 'start') {
-                // Use the main pivot for the active session, or direct WPP call
-                const data = await api('/api/session/start', { method: 'POST' });
+                const data = await api(`/api/session/${name}/start`, { method: 'POST' });
                 if (data) {
                     showToast(data.message || 'Sessão iniciada!');
                     addLog(data.message || 'Sessão iniciada', 'ok');
-                    startQRPollFor(name);
+                    // Poll QR for the NEW session name (may have changed after pivot)
+                    startQRPollFor(data.new_session || name);
+                    setTimeout(pollBotsStatus, 2000);
                 }
             } else if (action === 'close' || action === 'logout') {
                 if (!confirm(`${action === 'close' ? 'Fechar' : 'Deslogar'} sessão "${name}"?`)) return;
@@ -716,14 +717,16 @@
 
         async function addNewOperator() {
             addLog('Criando novo operador...', 'info');
-            const data = await api('/api/session/start', { method: 'POST' });
-            if (data) {
+            const data = await api('/api/session/new', { method: 'POST' });
+            if (data && data.status === 'success') {
                 showToast(data.message || 'Novo operador criado!');
                 addLog(data.message || 'Novo operador', 'ok');
-                pollBotsStatus();
+                await pollBotsStatus();
                 if (data.new_session) {
                     startQRPollFor(data.new_session);
                 }
+            } else {
+                showToast(data?.message || 'Erro ao criar operador', 'error');
             }
         }
 
@@ -750,7 +753,7 @@
                     return;
                 }
                 addLog(`[${name}] Buscando QR... (${count})`, 'info');
-                const data = await api('/api/qr');
+                const data = await api(`/api/session/${name}/qr`);
                 const a = document.getElementById(`qr_${name}`);
                 if (!a) { stopQRPollFor(name); return; }
                 if (data && data.qr) {
@@ -769,7 +772,7 @@
 
         async function fetchQRFor(name) {
             addLog(`[${name}] Buscando QR...`, 'info');
-            const data = await api('/api/qr');
+            const data = await api(`/api/session/${name}/qr`);
             const area = document.getElementById(`qr_${name}`);
             if (!area) return;
             if (data && data.qr) {

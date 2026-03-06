@@ -445,61 +445,117 @@ class ForwardEngine:
         logger.info(f"ENGINE: done — ✅ {success_count} / ❌ {fail_count} of {len(target_groups)} groups")
 
 
-# ── Global instances ─────────────────────────────────────────────────────────
-wpp: OperatorWPPClient | None = None
-engine = ForwardEngine()
+# ── Multi-Session Management ─────────────────────────────────────────────────
+class OperatorSession:
+    """A complete operator: WPP client + forwarding engine + QR cache."""
+    def __init__(self, name: str, wpp_client: OperatorWPPClient):
+        self.name = name
+        self.wpp = wpp_client
+        self.engine = ForwardEngine()
+        self.qr_cache: dict = {"qr": None, "updated_at": None}
 
-# ── QR Code Cache ────────────────────────────────────────────────────────────
-# WPP Server sends QR via 'onqrcode' webhook event — we capture and store it here.
-_qr_cache: dict = {"qr": None, "updated_at": None}
+
+class SessionManager:
+    """Manages multiple operator sessions simultaneously."""
+    def __init__(self):
+        self.sessions: dict[str, OperatorSession] = {}
+
+    def add(self, name: str, wpp_url: str, secret_key: str) -> OperatorSession:
+        """Create and register a new operator session."""
+        client = OperatorWPPClient(wpp_url, name, secret_key)
+        session = OperatorSession(name, client)
+        self.sessions[name] = session
+        logger.info(f"SessionManager: added session '{name}'")
+        return session
+
+    def remove(self, name: str):
+        """Remove a session from the manager."""
+        if name in self.sessions:
+            del self.sessions[name]
+            logger.info(f"SessionManager: removed session '{name}'")
+
+    def get(self, name: str) -> OperatorSession | None:
+        return self.sessions.get(name)
+
+    def get_first(self) -> OperatorSession | None:
+        """Get first registered session (backwards compat)."""
+        if self.sessions:
+            return next(iter(self.sessions.values()))
+        return None
+
+    def all(self) -> list[OperatorSession]:
+        return list(self.sessions.values())
+
+    def find_by_session(self, session_name: str) -> OperatorSession | None:
+        """Find session by WPP session name (may differ from key after pivot)."""
+        for s in self.sessions.values():
+            if s.wpp.session == session_name:
+                return s
+        return None
+
+    @property
+    def aggregated_stats(self) -> dict:
+        """Aggregate stats across all sessions."""
+        totals = {
+            "total_forwarded": 0,
+            "total_failed": 0,
+            "total_ads_detected": 0,
+            "total_skipped_not_media": 0,
+            "last_forward_time": None,
+            "last_ad_detected_time": None,
+            "forwards_this_hour": 0,
+        }
+        for s in self.sessions.values():
+            st = s.engine.stats
+            totals["total_forwarded"] += st.get("total_forwarded", 0)
+            totals["total_failed"] += st.get("total_failed", 0)
+            totals["total_ads_detected"] += st.get("total_ads_detected", 0)
+            totals["total_skipped_not_media"] += st.get("total_skipped_not_media", 0)
+            totals["forwards_this_hour"] += st.get("forwards_this_hour", 0)
+            for field in ["last_forward_time", "last_ad_detected_time"]:
+                val = st.get(field)
+                if val and (not totals[field] or val > totals[field]):
+                    totals[field] = val
+        return totals
+
+
+# Global session manager
+sm = SessionManager()
 
 
 # ── FastAPI App ──────────────────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global wpp
     config = load_config()
 
     logger.info("=" * 60)
-    logger.info("  OPERATOR BOT V2 — Reaction-Based")
-    logger.info(f"  Session: {config['session_name']}")
+    logger.info("  OPERATOR BOT V2 — Multi-Session")
     logger.info(f"  WPP Server: {config['wpp_server_url']}")
     logger.info(f"  Monitored groups: {len(config.get('monitored_groups', []))}")
     logger.info(f"  Target groups: {len(config.get('target_groups', []))}")
     logger.info(f"  Moderator IDs: {config.get('moderator_bot_ids', [])}")
-    logger.info(f"  Approved emoji: {config.get('approved_emoji', '🔁')}")
-    logger.info(f"  Forward delay: {config.get('forward_delay_seconds', 0)}s")
-    max_h = config.get('max_forwards_per_hour', 0)
-    logger.info(f"  Max forwards/hour: {'unlimited' if max_h <= 0 else max_h}")
     logger.info("=" * 60)
 
-    if not config.get("monitored_groups"):
-        logger.warning("⚠️  No monitored_groups configured!")
-    if not config.get("target_groups"):
-        logger.warning("⚠️  No target_groups configured!")
-    if not config.get("moderator_bot_ids"):
-        logger.warning("⚠️  No moderator_bot_ids configured — will accept reactions from anyone!")
+    # Restore all saved sessions
+    saved_sessions = config.get("sessions", [])
+    # Backwards compat: if no sessions list, use single session_name
+    if not saved_sessions:
+        saved_sessions = [config.get("session_name", "operator_1")]
 
-    wpp = OperatorWPPClient(
-        config["wpp_server_url"],
-        config["session_name"],
-        config["wpp_secret_key"],
-    )
-
-    try:
-        await wpp.generate_token()
-        # Try to auto-reconnect existing session (persisted across deploys)
-        # Start session will re-attach to existing browser if connected
-        await wpp.start_session()
-        await wpp.subscribe_webhook()
-        await asyncio.sleep(3)  # Give WPP Server time to check browser
-        status = await wpp.check_session_status()
-        if status.get("connected"):
-            logger.info(f"✅ Auto-reconnected to existing session '{wpp.session}'!")
-        else:
-            logger.info(f"Session '{wpp.session}' status: {status.get('status')}. May need 'Iniciar Sessão' on dashboard.")
-    except Exception as e:
-        logger.error(f"Startup error: {e}")
+    for name in saved_sessions:
+        op = sm.add(name, config["wpp_server_url"], config["wpp_secret_key"])
+        try:
+            await op.wpp.generate_token()
+            await op.wpp.start_session()
+            await op.wpp.subscribe_webhook()
+            await asyncio.sleep(2)
+            status = await op.wpp.check_session_status()
+            if status.get("connected"):
+                logger.info(f"✅ Session '{name}' auto-reconnected!")
+            else:
+                logger.info(f"Session '{name}' status: {status.get('status')}")
+        except Exception as e:
+            logger.error(f"Startup error for session '{name}': {e}")
 
     yield
     logger.info("Operator bot shutdown complete")
@@ -522,23 +578,34 @@ async def dashboard_page(request: Request):
 
 # ── QR Code Proxy ────────────────────────────────────────────────────────────
 @app.get("/api/qr")
-async def api_qr():
-    """Return QR code — prioritise in-memory cache (captured from webhook), then poll WPP API."""
-    # 1. Serve from webhook cache (fastest, most reliable)
-    if _qr_cache.get("qr"):
-        logger.info("Serving QR from webhook cache")
-        return {"qr": _qr_cache["qr"], "status": "waiting_scan"}
-
-    # 2. Ensure we have a token
-    if not wpp:
+@app.get("/api/session/{session_name}/qr")
+async def api_qr(session_name: str = None):
+    """Return QR code for a specific session (or first available)."""
+    # Find the right session
+    op = None
+    if session_name:
+        op = sm.get(session_name) or sm.find_by_session(session_name)
+    if not op:
+        op = sm.get_first()
+    if not op:
         return {"qr": None, "status": "not_initialized"}
+
+    wpp = op.wpp
+    qr_cache = op.qr_cache
+
+    # 1. Serve from webhook cache
+    if qr_cache.get("qr"):
+        logger.info(f"Serving QR from cache for '{wpp.session}'")
+        return {"qr": qr_cache["qr"], "status": "waiting_scan", "session": wpp.session}
+
+    # 2. Ensure token
     if not wpp.token:
         try:
             await wpp.generate_token()
         except Exception:
             return {"qr": None, "status": "no_token"}
 
-    # 3. Fallback: poll WPP Server qrcode-session endpoint
+    # 3. Fallback: poll WPP Server
     url = f"{wpp.base_url}/api/{wpp.session}/qrcode-session"
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
@@ -552,17 +619,17 @@ async def api_qr():
                 if "image" in content_type:
                     b64 = base64.b64encode(resp.content).decode("utf-8")
                     data_uri = f"data:{content_type.split(';')[0]};base64,{b64}"
-                    _qr_cache["qr"] = data_uri  # Store in cache
-                    return {"qr": data_uri, "status": "waiting_scan"}
+                    qr_cache["qr"] = data_uri
+                    return {"qr": data_uri, "status": "waiting_scan", "session": wpp.session}
                 try:
                     rdata = resp.json()
                     qr_data = rdata.get("qrcode") or rdata.get("base64Qr") or rdata.get("urlCode")
                     if qr_data:
-                        _qr_cache["qr"] = qr_data
-                        return {"qr": qr_data, "status": "waiting_scan"}
+                        qr_cache["qr"] = qr_data
+                        return {"qr": qr_data, "status": "waiting_scan", "session": wpp.session}
                     wpp_status = rdata.get("status", "no_qr")
                     if "connected" in str(wpp_status).lower():
-                        return {"qr": None, "status": "connected"}
+                        return {"qr": None, "status": "connected", "session": wpp.session}
                     return {"qr": None, "status": wpp_status}
                 except Exception:
                     return {"qr": None, "status": "unknown_response"}
@@ -573,23 +640,34 @@ async def api_qr():
 
 
 @app.post("/api/session/start")
-async def api_session_start():
-    """Session Pivot: deep-delete old session, create fresh one with new ID.
-    This is the same approach the moderator uses to reliably generate QR codes.
+@app.post("/api/session/{session_name}/start")
+async def api_session_start(session_name: str = None):
+    """Session Pivot: create or restart an operator session.
+    If session_name provided, pivots that specific session.
+    Otherwise, pivots the first available session.
     """
-    if not wpp:
-        return {"status": "error", "message": "WPP client not initialized"}
+    import re
+    config = get_cfg()
 
-    old_session = wpp.session
-    _qr_cache["qr"] = None
+    # Find or create session
+    op = None
+    if session_name:
+        op = sm.get(session_name) or sm.find_by_session(session_name)
+    if not op:
+        op = sm.get_first()
+    if not op:
+        # No sessions at all — create first one
+        op = sm.add("operator_1", config["wpp_server_url"], config["wpp_secret_key"])
+
+    old_session = op.wpp.session
+    op.qr_cache["qr"] = None
 
     try:
-        # 1. Ultra Deep Clean of old session
-        logger.info(f"PIVOT: Deep-cleaning old session '{old_session}'...")
-        await wpp.delete_session()
+        # 1. Deep Clean old session
+        logger.info(f"PIVOT [{op.name}]: Deep-cleaning old session '{old_session}'...")
+        await op.wpp.delete_session()
 
-        # 2. Increment session ID (operator_1 -> operator_2)
-        import re
+        # 2. Increment session ID
         match = re.search(r'(\d+)$', old_session)
         if match:
             num = int(match.group(1))
@@ -598,26 +676,24 @@ async def api_session_start():
         else:
             new_session = f"{old_session}_1"
 
-        # 3. Switch to new session and PERSIST it
-        logger.info(f"PIVOT: Switching session from '{old_session}' to '{new_session}'")
-        wpp.session = new_session
-        cfg = get_cfg()
-        cfg["session_name"] = new_session
-        save_config(cfg)
+        # 3. Switch to new session
+        logger.info(f"PIVOT [{op.name}]: Switching '{old_session}' → '{new_session}'")
+        op.wpp.session = new_session
 
-        # 4. Deep-clean the NEW session too (in case stale data exists from a previous attempt)
-        logger.info(f"PIVOT: Pre-cleaning new session '{new_session}' (prevent stale cache)...")
-        await wpp.delete_session()
+        # 4. Update SessionManager key
+        sm.sessions.pop(op.name, None)
+        op.name = new_session
+        sm.sessions[new_session] = op
 
-        # 5. Small delay for WPP Server to release Chromium resources
+        # 5. Persist sessions to config
+        _persist_sessions()
+
+        # 6. Pre-clean new session + start
+        await op.wpp.delete_session()
         await asyncio.sleep(3)
-
-        # 6. Generate fresh token for new session name
-        await wpp.generate_token()
-
-        # 7. Start brand new session
-        await wpp.start_session()
-        await wpp.subscribe_webhook()
+        await op.wpp.generate_token()
+        await op.wpp.start_session()
+        await op.wpp.subscribe_webhook()
 
         return {
             "status": "success",
@@ -629,12 +705,56 @@ async def api_session_start():
         return {"status": "error", "message": str(e)}
 
 
+@app.post("/api/session/new")
+async def api_session_new():
+    """Create a brand NEW operator session alongside existing ones."""
+    config = get_cfg()
+
+    # Find next available operator number
+    existing_nums = []
+    for op in sm.all():
+        import re
+        m = re.search(r'(\d+)$', op.wpp.session)
+        if m:
+            existing_nums.append(int(m.group(1)))
+    next_num = max(existing_nums, default=0) + 1
+    new_name = f"operator_{next_num}"
+
+    try:
+        # Create new session in manager
+        op = sm.add(new_name, config["wpp_server_url"], config["wpp_secret_key"])
+
+        # Start it up
+        await op.wpp.generate_token()
+        await op.wpp.start_session()
+        await op.wpp.subscribe_webhook()
+
+        # Persist
+        _persist_sessions()
+
+        logger.info(f"NEW OPERATOR: Created session '{new_name}'")
+        return {
+            "status": "success",
+            "message": f"Operador '{new_name}' criado! Aguarde o QR Code.",
+            "new_session": new_name
+        }
+    except Exception as e:
+        logger.error(f"Error creating new operator: {e}")
+        return {"status": "error", "message": str(e)}
+
+
+def _persist_sessions():
+    """Save current session names to config for persistence."""
+    cfg = get_cfg()
+    cfg["sessions"] = [op.wpp.session for op in sm.all()]
+    save_config(cfg)
+
+
 # ── Webhook Handler ──────────────────────────────────────────────────────────
 @app.post("/webhook")
 async def receive_webhook(request: Request):
     """Handle WPPConnect webhook events.
-    Core logic: detect moderator's 🔁 reaction on messages in monitored groups,
-    then forward the original message to target groups.
+    Routes events to the correct OperatorSession by the 'session' field.
     """
     try:
         data = await request.json()
@@ -643,9 +763,13 @@ async def receive_webhook(request: Request):
 
     event = (data.get("event", "") or "").lower()
     config = get_cfg()
+    # Identify which session this event belongs to
+    session_name = data.get("session", "")
+    op = sm.find_by_session(session_name) if session_name else sm.get_first()
+    if not op:
+        op = sm.get_first()  # Fallback
 
-    # DEBUG: Log ALL incoming webhook events
-    logger.info(f"WEBHOOK EVENT: '{event}' | Keys: {list(data.keys())[:10]} | Data preview: {json.dumps(data, default=str)[:300]}")
+    logger.info(f"WEBHOOK [{session_name}] EVENT: '{event}' | Keys: {list(data.keys())[:10]} | Preview: {json.dumps(data, default=str)[:200]}")
 
     # ── Capture QR Code from webhook ─────────────────────────────────────
     if event in ("onqrcode", "qrcode", "on-qr-code"):
@@ -655,50 +779,45 @@ async def receive_webhook(request: Request):
             qr_value = response.get("qrcode") or response.get("base64Qr") or response.get("urlCode")
         elif isinstance(response, str) and len(response) > 10:
             qr_value = response
-        # Also check top-level fields
         if not qr_value:
             qr_value = data.get("qrcode") or data.get("base64Qr") or data.get("urlCode")
-        if qr_value:
-            _qr_cache["qr"] = qr_value
-            _qr_cache["updated_at"] = datetime.utcnow().isoformat()
-            logger.info(f"QR Code captured from webhook event '{event}' ({len(str(qr_value))} chars)")
+        if qr_value and op:
+            op.qr_cache["qr"] = qr_value
+            op.qr_cache["updated_at"] = datetime.utcnow().isoformat()
+            logger.info(f"QR captured for session '{session_name}' ({len(str(qr_value))} chars)")
             return {"status": "qr_captured"}
-        logger.warning(f"onqrcode event received but no QR value found: {str(data)[:200]}")
+        logger.warning(f"onqrcode but no QR value: {str(data)[:200]}")
         return {"status": "qr_empty"}
 
     # ── Clear QR cache on connect ─────────────────────────────────────────
     if event in ("onconnectionupdate", "onstatechange") and "connected" in str(data).lower():
-        _qr_cache["qr"] = None
+        if op:
+            op.qr_cache["qr"] = None
 
     # ── Handle reaction events ───────────────────────────────────────────
     if event in ("onreactionmessage", "on-reaction-message", "onreaction"):
+        if not op:
+            return {"status": "no_session"}
+
         response = data.get("response") or data.get("data") or data
         if not isinstance(response, dict):
             return {"status": "invalid_reaction"}
 
-        # Extract reaction details
         reaction_text = response.get("reactionText", "") or response.get("reaction", "") or ""
         approved_emoji = config.get("approved_emoji", "🔁")
-
-        # Check if this is the approved emoji
         if reaction_text != approved_emoji:
             return {"status": "wrong_emoji"}
 
-        # Check which chat this reaction happened in
-        # Reaction events can have chatId at different levels
         chat_id = (
             response.get("chatId", "")
             or response.get("chat", {}).get("id", {}).get("_serialized", "")
             if isinstance(response.get("chat"), dict) else ""
         )
-        # Also try msgId to extract chatId
         msg_id_obj = response.get("msgId") or response.get("id") or response.get("reactionBy") or {}
 
-        # Try to get the _serialized ID of the REACTED-TO message
         reacted_msg_id = ""
         if isinstance(msg_id_obj, dict):
             reacted_msg_id = msg_id_obj.get("_serialized", "")
-            # Extract chatId from the msg_id if not found yet
             if not chat_id:
                 remote = msg_id_obj.get("remote", {})
                 if isinstance(remote, dict):
@@ -708,36 +827,30 @@ async def receive_webhook(request: Request):
         elif isinstance(msg_id_obj, str):
             reacted_msg_id = msg_id_obj
 
-        # WPPConnect sometimes puts the reacted message ID in different fields
         if not reacted_msg_id:
-            # Try response.msgId._serialized
             for field in ["msgId", "id", "messageId"]:
                 obj = response.get(field, {})
                 if isinstance(obj, dict):
                     reacted_msg_id = obj.get("_serialized", "")
-                    if reacted_msg_id:
-                        break
+                    if reacted_msg_id: break
                 elif isinstance(obj, str) and obj:
                     reacted_msg_id = obj
                     break
 
         if not reacted_msg_id:
-            logger.warning(f"REACTION: approved emoji detected but no msg_id found. Data: {json.dumps(response, default=str)[:500]}")
+            logger.warning(f"REACTION: emoji but no msg_id. Data: {json.dumps(response, default=str)[:500]}")
             return {"status": "no_msg_id"}
 
-        # Check if chat is a monitored group
         monitored = config.get("monitored_groups", [])
         if monitored and chat_id and chat_id not in monitored:
             return {"status": "not_monitored_group"}
 
-        # Check if reactor is a moderator bot
         sender_id = ""
         sender_obj = response.get("sender", {}) or response.get("senderId", "")
         if isinstance(sender_obj, dict):
             sender_id = sender_obj.get("id", "") or sender_obj.get("_serialized", "") or sender_obj.get("user", "")
         elif isinstance(sender_obj, str):
             sender_id = sender_obj
-        # Also check reactionBy field
         if not sender_id:
             reaction_by = response.get("reactionBy", "")
             if isinstance(reaction_by, str):
@@ -746,56 +859,54 @@ async def receive_webhook(request: Request):
                 sender_id = reaction_by.get("_serialized", "") or reaction_by.get("user", "")
 
         sender_phone = sender_id.split("@")[0] if sender_id else ""
-
         mod_ids = config.get("moderator_bot_ids", [])
         if mod_ids and sender_phone not in mod_ids:
             logger.info(f"REACTION: emoji from non-moderator {sender_phone[:15]}, ignoring")
             return {"status": "not_moderator"}
-
-        # If no moderator filter configured, log a warning but proceed
         if not mod_ids:
-            logger.warning(f"REACTION: no moderator_bot_ids configured, accepting reaction from {sender_phone[:15]}")
+            logger.warning(f"REACTION: no moderator_bot_ids configured")
 
-        logger.info(f"REACTION: 🔁 approved ad detected! msg_id={reacted_msg_id[:50]}, chat={chat_id[:25]}, reactor={sender_phone[:15]}")
+        logger.info(f"REACTION [{op.name}]: 🔁 approved ad! msg_id={reacted_msg_id[:50]}, chat={chat_id[:25]}")
 
-        # Forward in background
-        asyncio.create_task(engine.process_approved_ad(wpp, reacted_msg_id, chat_id))
-
+        # Forward using THIS session's engine and WPP client
+        asyncio.create_task(op.engine.process_approved_ad(op.wpp, reacted_msg_id, chat_id))
         return {"status": "forwarding"}
 
-    # ── Ignore all other events ──────────────────────────────────────────
-    # We only care about reactions — the moderator handles everything else
     return {"status": "ignored"}
 
 
 # ── API Endpoints ────────────────────────────────────────────────────────────
 @app.get("/health")
 async def health():
-    """Health check."""
+    """Health check — aggregated across all sessions."""
     config = get_cfg()
+    # Use first session for backwards compat
+    first = sm.get_first()
     session_status = {"connected": False, "status": "unknown"}
-    if wpp:
-        session_status = await wpp.check_session_status()
+    if first:
+        session_status = await first.wpp.check_session_status()
 
     return {
         "status": "ok",
-        "version": "v2-reaction",
-        "session": config.get("session_name"),
+        "version": "v3-multi-session",
+        "session": first.wpp.session if first else "?",
         "connected": session_status.get("connected", False),
         "monitored_groups": len(config.get("monitored_groups", [])),
         "target_groups": len(config.get("target_groups", [])),
-        "engine": engine.stats,
+        "engine": sm.aggregated_stats,
+        "total_sessions": len(sm.sessions),
         "timestamp": datetime.now().isoformat(),
     }
 
 
 @app.get("/stats")
 async def stats():
-    """Detailed stats."""
+    """Detailed stats — aggregated."""
     return {
-        "engine": engine.stats,
+        "engine": sm.aggregated_stats,
+        "sessions": {op.name: op.engine.stats for op in sm.all()},
         "config": {
-            "session": get_cfg().get("session_name"),
+            "sessions": [op.wpp.session for op in sm.all()],
             "monitored_groups": get_cfg().get("monitored_groups", []),
             "target_groups": get_cfg().get("target_groups", []),
             "moderator_bot_ids": get_cfg().get("moderator_bot_ids", []),
@@ -808,79 +919,45 @@ async def stats():
 
 @app.get("/api/bots-status")
 async def bots_status():
-    """Return status of ALL operator sessions on the WPP Server."""
+    """Return status of ALL managed operator sessions."""
     config = get_cfg()
-    active_session = wpp.session if wpp else config.get("session_name")
     sessions = []
 
-    # Query WPP server for all sessions
-    try:
-        async with httpx.AsyncClient(timeout=8.0) as client:
-            # Generate token for listing
-            tok_resp = await client.post(
-                f"{config['wpp_server_url']}/api/mySession/{config['wpp_secret_key']}/generate-token",
-                timeout=5
-            )
-            token = tok_resp.json().get("token", "") if tok_resp.status_code in (200, 201) else ""
-            headers = {"Authorization": f"Bearer {token}"}
+    # Use SessionManager — check each registered session
+    for op in sm.all():
+        status_info = {"connected": False, "status": "DISCONNECTED"}
+        try:
+            status_info = await op.wpp.check_session_status()
+        except:
+            pass
 
-            # List all sessions
-            resp = await client.get(
-                f"{config['wpp_server_url']}/api/mySession/show-all-sessions",
-                headers=headers, timeout=8
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                session_list = data.get("response", data) if isinstance(data, dict) else data
-                if isinstance(session_list, list):
-                    for s in session_list:
-                        name = s if isinstance(s, str) else s.get("session", s.get("name", "?"))
-                        if not name or name == "mySession":
-                            continue
-                        # Check each session's status
-                        try:
-                            sr = await client.get(
-                                f"{config['wpp_server_url']}/api/{name}/check-connection-session",
-                                headers=headers, timeout=5
-                            )
-                            if sr.status_code == 200:
-                                connected = sr.json().get("response", False)
-                            else:
-                                connected = False
-                        except:
-                            connected = False
-
-                        sessions.append({
-                            "name": name,
-                            "connected": connected,
-                            "status": "CONNECTED" if connected else "DISCONNECTED",
-                            "active": name == active_session,
-                        })
-    except Exception as e:
-        logger.warning(f"Error listing sessions: {e}")
-
-    # If no sessions found from WPP, at least show the current one
-    if not sessions:
-        op_status = await wpp.check_session_status() if wpp else {"connected": False, "status": "CLOSED"}
         sessions.append({
-            "name": active_session,
-            "connected": op_status.get("connected", False),
-            "status": op_status.get("status", "CLOSED"),
+            "name": op.wpp.session,
+            "connected": status_info.get("connected", False),
+            "status": "CONNECTED" if status_info.get("connected") else status_info.get("status", "DISCONNECTED"),
             "active": True,
+            "stats": op.engine.stats,
         })
 
-    # Bot webserver is always online if we're responding
+    # If no sessions in manager, show fallback
+    if not sessions:
+        sessions.append({
+            "name": config.get("session_name", "operator_1"),
+            "connected": False,
+            "status": "CLOSED",
+            "active": False,
+        })
+
     return {
         "webserver": True,
-        "active_session": active_session,
         "sessions": sessions,
-        "engine": engine.stats,
+        "engine": sm.aggregated_stats,
     }
 
 
 @app.post("/api/session/{session_name}/close")
 async def close_session_api(session_name: str):
-    """Close and delete a specific session on the WPP server."""
+    """Close and delete a specific session."""
     config = get_cfg()
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
@@ -891,19 +968,23 @@ async def close_session_api(session_name: str):
             token = tok_resp.json().get("token", "") if tok_resp.status_code in (200, 201) else ""
             headers = {"Authorization": f"Bearer {token}"}
 
-            # Logout + Close + Clear
             for endpoint in ["logout-session", "close-session", "clear-session-data"]:
                 try:
                     await client.post(f"{config['wpp_server_url']}/api/{session_name}/{endpoint}", headers=headers, timeout=8)
                 except: pass
                 await asyncio.sleep(1)
 
-            # DELETE
             try:
                 await client.delete(f"{config['wpp_server_url']}/api/{session_name}", headers=headers, timeout=8)
             except: pass
 
-        logger.info(f"Session '{session_name}' closed and deleted")
+        # Also remove from SessionManager
+        op = sm.find_by_session(session_name)
+        if op:
+            sm.remove(op.name)
+            _persist_sessions()
+
+        logger.info(f"Session '{session_name}' closed and removed")
         return {"status": "ok", "message": f"Sessão '{session_name}' removida"}
     except Exception as e:
         logger.error(f"Error closing session {session_name}: {e}")
@@ -930,11 +1011,17 @@ async def update_config_api(request: Request):
 
 
 @app.post("/reconnect")
-async def reconnect():
-    if wpp:
-        await wpp.full_reconnect()
-        return {"status": "reconnecting"}
-    return {"status": "error", "message": "WPP client not initialized"}
+@app.post("/api/session/{session_name}/reconnect")
+async def reconnect(session_name: str = None):
+    op = None
+    if session_name:
+        op = sm.get(session_name) or sm.find_by_session(session_name)
+    if not op:
+        op = sm.get_first()
+    if op:
+        await op.wpp.full_reconnect()
+        return {"status": "reconnecting", "session": op.wpp.session}
+    return {"status": "error", "message": "No sessions available"}
 
 
 # ── Main ─────────────────────────────────────────────────────────────────────
