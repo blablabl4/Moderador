@@ -2,9 +2,11 @@
 # This builds an up-to-date version that supports current WhatsApp Web QR codes
 FROM node:20-slim
 
-# Install Chromium dependencies
+# Install Chromium + SSL certificates + git (all in one layer)
 RUN apt-get update && apt-get install -y \
     chromium \
+    ca-certificates \
+    git \
     fonts-ipafont-gothic fonts-wqy-zenhei fonts-thai-tlwg fonts-kacst fonts-freefont-ttf \
     --no-install-recommends && \
     rm -rf /var/lib/apt/lists/*
@@ -15,12 +17,9 @@ ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 WORKDIR /usr/src/wpp-server
 
 # Clone and build latest wppconnect-server
-RUN apt-get update && apt-get install -y git --no-install-recommends && \
-    git clone --depth 1 https://github.com/wppconnect-team/wppconnect-server.git . && \
+RUN git clone --depth 1 https://github.com/wppconnect-team/wppconnect-server.git . && \
     npm install && \
-    npm run build && \
-    apt-get remove -y git && apt-get autoremove -y && \
-    rm -rf /var/lib/apt/lists/*
+    npm run build
 
 EXPOSE 8080
 
