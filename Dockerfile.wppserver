@@ -21,6 +21,11 @@ RUN git clone --depth 1 https://github.com/wppconnect-team/wppconnect-server.git
     npm install && \
     npm run build
 
+# Copy the entrypoint that injects WEBHOOK_URL into the compiled config
+COPY entrypoint-wpp.sh /usr/src/wpp-server/entrypoint.sh
+RUN chmod +x /usr/src/wpp-server/entrypoint.sh
+
 EXPOSE 8080
 
-CMD ["node", "dist/server.js"]
+# Use entrypoint that patches config with WEBHOOK_URL env var before starting
+CMD ["/usr/src/wpp-server/entrypoint.sh"]
