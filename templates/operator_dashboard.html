@@ -383,55 +383,30 @@
     </div>
 
     <div class="container">
-        <!-- Bot Status Panel -->
-        <div class="grid-2">
-            <div class="card" id="modStatusCard">
-                <div class="card-header">
-                    🤖 Moderador
-                    <span id="modStatusBadge" class="status-badge status-disconnected">
-                        <div class="status-dot off" id="modDot"></div>
-                        <span id="modStatusLabel">...</span>
-                    </span>
-                </div>
-                <div class="card-body">
-                    <div style="display:flex; flex-direction:column; gap:8px; font-size:13px;">
-                        <div style="display:flex; justify-content:space-between;">
-                            <span style="color:var(--text-dim)">Sessão</span>
-                            <span id="modSession" style="font-family:monospace">—</span>
-                        </div>
-                        <div style="display:flex; justify-content:space-between;">
-                            <span style="color:var(--text-dim)">Conexão</span>
-                            <span id="modConnection">—</span>
-                        </div>
-                        <div style="display:flex; justify-content:space-between;">
-                            <span style="color:var(--text-dim)">Grupos</span>
-                            <span id="modGroups">—</span>
-                        </div>
+        <!-- Status do Sistema -->
+        <div class="card">
+            <div class="card-header">📡 Status do Sistema</div>
+            <div class="card-body">
+                <div style="display:flex; flex-direction:column; gap:12px; font-size:14px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <span>Bot Webserver</span>
+                        <span id="sysWebserver" class="status-badge status-disconnected"
+                            style="font-size:11px; padding:4px 12px;">OFFLINE</span>
                     </div>
-                </div>
-            </div>
-            <div class="card" id="opStatusCard">
-                <div class="card-header">
-                    📡 Operador
-                    <span id="opStatusBadge" class="status-badge status-disconnected">
-                        <div class="status-dot off" id="opDot"></div>
-                        <span id="opStatusLabel">...</span>
-                    </span>
-                </div>
-                <div class="card-body">
-                    <div style="display:flex; flex-direction:column; gap:8px; font-size:13px;">
-                        <div style="display:flex; justify-content:space-between;">
-                            <span style="color:var(--text-dim)">Sessão</span>
-                            <span id="opSession" style="font-family:monospace">—</span>
-                        </div>
-                        <div style="display:flex; justify-content:space-between;">
-                            <span style="color:var(--text-dim)">Conexão</span>
-                            <span id="opConnection">—</span>
-                        </div>
-                        <div style="display:flex; justify-content:space-between;">
-                            <span style="color:var(--text-dim)">Encaminhados</span>
-                            <span id="opForwarded" style="color:var(--green)">0</span>
-                        </div>
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <span>WPP Conexão</span>
+                        <span id="sysWppConn" class="status-badge status-disconnected"
+                            style="font-size:11px; padding:4px 12px;">DESCONECTADO</span>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <span>Status da Sessão</span>
+                        <span id="sysSessionStatus" class="status-badge status-disconnected"
+                            style="font-size:11px; padding:4px 12px;">UNKNOWN</span>
+                    </div>
+                    <div
+                        style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid var(--border); padding-top:10px;">
+                        <span style="color:var(--text-dim)">Sessão</span>
+                        <span id="sysSessionName" style="font-family:monospace; color:var(--accent2)">—</span>
                     </div>
                 </div>
             </div>
@@ -619,47 +594,44 @@
             document.getElementById('statTargets').textContent = data.target_groups || 0;
         }
 
-        // ── Bots Status Panel ───────────────────────────────────────────
+        // ── Status do Sistema ────────────────────────────────────────────
         async function pollBotsStatus() {
             const data = await api('/api/bots-status');
             if (!data) return;
 
-            // Moderator
-            const mod = data.moderator || {};
-            const modBadge = document.getElementById('modStatusBadge');
-            const modDot = document.getElementById('modDot');
-            const modLabel = document.getElementById('modStatusLabel');
-            if (mod.connected) {
-                modBadge.className = 'status-badge status-connected';
-                modDot.className = 'status-dot on';
-                modLabel.textContent = 'Online';
-            } else {
-                modBadge.className = 'status-badge status-disconnected';
-                modDot.className = 'status-dot off';
-                modLabel.textContent = mod.status === 'unknown' ? 'Offline' : mod.status;
-            }
-            document.getElementById('modSession').textContent = mod.session || '—';
-            document.getElementById('modConnection').textContent = mod.connected ? '✅ Conectado' : '❌ Desconectado';
-            document.getElementById('modGroups').textContent = mod.groups || 0;
-
-            // Operator
             const op = data.operator || {};
-            const opBadge = document.getElementById('opStatusBadge');
-            const opDot = document.getElementById('opDot');
-            const opLabel = document.getElementById('opStatusLabel');
+
+            // Bot Webserver — always ONLINE if we got a response
+            const ws = document.getElementById('sysWebserver');
+            ws.textContent = 'ONLINE';
+            ws.className = 'status-badge status-connected';
+            ws.style.cssText = 'font-size:11px; padding:4px 12px;';
+
+            // WPP Conexão
+            const wc = document.getElementById('sysWppConn');
             if (op.connected) {
-                opBadge.className = 'status-badge status-connected';
-                opDot.className = 'status-dot on';
-                opLabel.textContent = 'Online';
+                wc.textContent = 'CONECTADO';
+                wc.className = 'status-badge status-connected';
             } else {
-                opBadge.className = 'status-badge status-disconnected';
-                opDot.className = 'status-dot off';
-                opLabel.textContent = 'Offline';
+                wc.textContent = 'DESCONECTADO';
+                wc.className = 'status-badge status-disconnected';
             }
-            document.getElementById('opSession').textContent = op.session || '—';
-            document.getElementById('opConnection').textContent = op.connected ? '✅ Conectado' : '❌ Desconectado';
-            const eng = op.engine || {};
-            document.getElementById('opForwarded').textContent = eng.total_forwarded || 0;
+            wc.style.cssText = 'font-size:11px; padding:4px 12px;';
+
+            // Status da Sessão
+            const ss = document.getElementById('sysSessionStatus');
+            const statusText = (op.status || 'UNKNOWN').toUpperCase();
+            if (statusText === 'CONNECTED' || op.connected) {
+                ss.textContent = 'CONNECTED';
+                ss.className = 'status-badge status-connected';
+            } else {
+                ss.textContent = statusText;
+                ss.className = 'status-badge status-disconnected';
+            }
+            ss.style.cssText = 'font-size:11px; padding:4px 12px;';
+
+            // Sessão name
+            document.getElementById('sysSessionName').textContent = op.session || '—';
         }
 
         // ── QR Code ─────────────────────────────────────────────────────
