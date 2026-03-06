@@ -422,6 +422,22 @@
         </div>
     </div>
 
+    <!-- Live Logs -->
+    <div class="card" style="margin-top:20px;">
+        <div class="card-header" style="display:flex; align-items:center; justify-content:space-between;">
+            <span>📋 Logs em Tempo Real</span>
+            <div style="display:flex; gap:8px;">
+                <button id="logToggleBtn" onclick="toggleLogPoll()" style="background:#00e676;color:#000;border:none;border-radius:6px;padding:4px 12px;font-size:12px;font-weight:700;cursor:pointer;">⏸ Pausar</button>
+                <button onclick="clearLogPanel()" style="background:#444;color:#fff;border:none;border-radius:6px;padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer;">🗑 Limpar</button>
+            </div>
+        </div>
+        <div class="card-body" style="padding:0;">
+            <div id="logBox" style="background:#0a0e14; color:#c5cdd9; font-family:'Consolas','Fira Code',monospace; font-size:11px; line-height:1.6; padding:12px; height:350px; overflow-y:auto; white-space:pre-wrap; word-break:break-all;"></div>
+        </div>
+    </div>
+
+    </div>
+
     <div class="toast" id="toast"></div>
 
     <script>
@@ -848,11 +864,75 @@
         }
 
         // ── Init ────────────────────────────────────────────────────────
+        let logPollTimer = null;
+        let logSince = null;
+        let logPollActive = true;
+
+        function colorizeLog(entry) {
+            let color = '#c5cdd9';
+            let prefix = '';
+            const msg = entry.msg || '';
+            const level = entry.level || '';
+
+            if (level === 'WARNING') { color = '#f5a623'; prefix = '⚠️ '; }
+            else if (level === 'ERROR') { color = '#ff5252'; prefix = '❌ '; }
+            else if (msg.includes('WEBHOOK')) { color = '#64b5f6'; prefix = '📨 '; }
+            else if (msg.includes('REACTION')) { color = '#ab47bc'; prefix = '⚡ '; }
+            else if (msg.includes('ENGINE')) { color = '#66bb6a'; prefix = '🔄 '; }
+            else if (msg.includes('QR')) { color = '#26c6da'; prefix = '📱 '; }
+
+            const ts = (entry.ts || '').substring(0, 8);
+            return `<span style="color:#555">${ts}</span> ${prefix}<span style="color:${color}">${msg}</span>`;
+        }
+
+        async function pollLogs() {
+            if (!logPollActive) return;
+            try {
+                const url = logSince ? `/api/logs?since=${encodeURIComponent(logSince)}` : '/api/logs';
+                const data = await api(url);
+                if (data && data.logs && data.logs.length > 0) {
+                    const box = document.getElementById('logBox');
+                    const wasAtBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 30;
+                    for (const entry of data.logs) {
+                        box.innerHTML += colorizeLog(entry) + '\n';
+                    }
+                    logSince = data.timestamp;
+                    // Keep max 500 lines in DOM
+                    const lines = box.innerHTML.split('\n');
+                    if (lines.length > 500) {
+                        box.innerHTML = lines.slice(-500).join('\n');
+                    }
+                    if (wasAtBottom) box.scrollTop = box.scrollHeight;
+                } else if (data) {
+                    logSince = data.timestamp;
+                }
+            } catch (e) { /* silent */ }
+        }
+
+        function toggleLogPoll() {
+            logPollActive = !logPollActive;
+            const btn = document.getElementById('logToggleBtn');
+            if (logPollActive) {
+                btn.textContent = '⏸ Pausar';
+                btn.style.background = '#00e676';
+            } else {
+                btn.textContent = '▶ Retomar';
+                btn.style.background = '#f5a623';
+            }
+        }
+
+        function clearLogPanel() {
+            document.getElementById('logBox').innerHTML = '';
+            logSince = new Date().toISOString();
+        }
+
         document.addEventListener('DOMContentLoaded', () => {
             pollHealth();
             pollBotsStatus();
+            pollLogs();
             pollInterval = setInterval(pollHealth, 5000);
             setInterval(pollBotsStatus, 10000);
+            setInterval(pollLogs, 2000);
         });
     </script>
 </body>

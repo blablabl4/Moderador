@@ -39,6 +39,38 @@ logging.basicConfig(
 )
 logger = logging.getLogger("operator")
 
+# In-memory log ring buffer for live dashboard
+from collections import deque
+
+class MemoryLogHandler(logging.Handler):
+    """Stores last N log entries in memory for API access."""
+    def __init__(self, max_entries=200):
+        super().__init__()
+        self.buffer = deque(maxlen=max_entries)
+
+    def emit(self, record):
+        try:
+            entry = {
+                "ts": self.format(record),
+                "level": record.levelname,
+                "msg": record.getMessage(),
+                "time": datetime.now().isoformat()
+            }
+            self.buffer.append(entry)
+        except Exception:
+            pass
+
+    def get_logs(self, since=None):
+        if since:
+            return [e for e in self.buffer if e["time"] > since]
+        return list(self.buffer)
+
+_mem_handler = MemoryLogHandler(max_entries=200)
+_mem_handler.setFormatter(logging.Formatter("%(asctime)s [OPERATOR] %(levelname)s %(message)s", datefmt="%H:%M:%S"))
+logger.addHandler(_mem_handler)
+# Also capture root logger (httpx, uvicorn, etc.)
+logging.getLogger().addHandler(_mem_handler)
+
 # ── Configuration ────────────────────────────────────────────────────────────
 # Use /data volume if available (Railway persistent volume), otherwise local
 if os.path.exists("/data") and os.access("/data", os.W_OK):
@@ -937,6 +969,13 @@ async def health():
         "total_sessions": len(sm.sessions),
         "timestamp": datetime.now().isoformat(),
     }
+
+
+@app.get("/api/logs")
+async def api_logs(since: str = None):
+    """Return recent logs from memory buffer."""
+    logs = _mem_handler.get_logs(since=since)
+    return {"logs": logs, "count": len(logs), "timestamp": datetime.now().isoformat()}
 
 
 @app.get("/stats")
