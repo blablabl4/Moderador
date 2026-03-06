@@ -266,31 +266,50 @@ class OperatorWPPClient:
             logger.warning(f"Close session error (non-fatal): {e}")
 
     async def delete_session(self):
-        """Delete session data completely (Ultra Deep Clean — same as moderator)."""
+        """Delete session data completely. Uses correct WPPConnect API URLs."""
         async with httpx.AsyncClient(timeout=20.0) as client:
-            # 1. Logout
+            # 1. Logout (clears auth, forces new QR)
             try:
-                await client.post(f"{self.base_url}/api/{self.session}/logout-session", headers=self.headers)
+                resp = await client.post(
+                    f"{self.base_url}/api/{self.session}/logout-session",
+                    headers=self.headers
+                )
+                logger.info(f"Logout session: {resp.status_code}")
                 await asyncio.sleep(2)
-            except: pass
-            # 2. Close
+            except Exception as e:
+                logger.warning(f"Logout failed: {e}")
+            # 2. Close session (stops the browser)
             try:
-                await client.post(f"{self.base_url}/api/{self.session}/close-session", headers=self.headers)
+                resp = await client.post(
+                    f"{self.base_url}/api/{self.session}/close-session",
+                    headers=self.headers
+                )
+                logger.info(f"Close session: {resp.status_code}")
                 await asyncio.sleep(2)
-            except: pass
-            # 3. Clear session data
+            except Exception as e:
+                logger.warning(f"Close failed: {e}")
+            # 3. Clear session data (requires secretkey in URL!)
             try:
-                resp = await client.post(f"{self.base_url}/api/{self.session}/clear-session-data", headers=self.headers)
-                logger.info(f"Clear Session Data: {resp.status_code}")
-                await asyncio.sleep(2)
+                resp = await client.post(
+                    f"{self.base_url}/api/{self.session}/{self.secret_key}/clear-session-data"
+                )
+                logger.info(f"Clear Session Data: {resp.status_code} - {resp.text[:100]}")
             except Exception as e:
                 logger.warning(f"Clear session data failed: {e}")
-            # 4. DELETE the session (final blow)
-            try:
-                resp = await client.delete(f"{self.base_url}/api/{self.session}", headers=self.headers)
-                logger.info(f"Delete Session: {resp.status_code}")
-            except Exception as e:
-                logger.warning(f"Delete session failed: {e}")
+
+    async def logout_session(self):
+        """Logout to force a fresh QR code on next start."""
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.post(
+                    f"{self.base_url}/api/{self.session}/logout-session",
+                    headers=self.headers
+                )
+                logger.info(f"Logout session: {resp.status_code} - {resp.text[:100]}")
+                return resp.status_code in (200, 201)
+        except Exception as e:
+            logger.error(f"Logout error: {e}")
+            return False
 
 
 
@@ -1078,6 +1097,22 @@ async def api_session_groups(session_name: str):
     except Exception as e:
         logger.error(f"Error fetching groups for {session_name}: {e}")
         return {"status": "error", "message": str(e), "groups": []}
+
+
+@app.post("/api/session/{session_name}/logout")
+async def api_session_logout(session_name: str):
+    """Logout session (clears auth, forces fresh QR). Then clear session data."""
+    op = sm.get(session_name) or sm.find_by_session(session_name)
+    if not op:
+        return {"status": "error", "message": f"Session '{session_name}' not found"}
+    try:
+        await op.wpp.delete_session()  # logout + close + clear-session-data
+        op.qr_cache["qr"] = None
+        logger.info(f"LOGOUT [{session_name}]: Session cleared, ready for fresh start")
+        return {"status": "ok", "message": f"Sessão '{session_name}' deslogada. Clique 'Iniciar' para novo QR."}
+    except Exception as e:
+        logger.error(f"Logout error: {e}")
+        return {"status": "error", "message": str(e)}
 
 
 @app.post("/api/session/{session_name}/close")

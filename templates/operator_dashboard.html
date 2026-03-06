@@ -811,8 +811,19 @@
                     startQRPollFor(data.new_session || name);
                     setTimeout(pollBotsStatus, 2000);
                 }
-            } else if (action === 'close' || action === 'logout') {
-                if (!confirm(`${action === 'close' ? 'Fechar' : 'Deslogar'} sessão "${name}"?`)) return;
+            } else if (action === 'logout') {
+                if (!confirm(`Deslogar sessão "${name}"? Vai precisar escanear QR novamente.`)) return;
+                showToast('Limpando sessão...');
+                const data = await api(`/api/session/${name}/logout`, { method: 'POST' });
+                if (data && data.status === 'ok') {
+                    showToast(`✅ ${data.message}`);
+                    delete qrStateCache[name];
+                    pollBotsStatus();
+                } else {
+                    showToast('❌ Erro ao deslogar', 'error');
+                }
+            } else if (action === 'close') {
+                if (!confirm(`Fechar sessão "${name}"?`)) return;
                 const data = await api(`/api/session/${name}/close`, { method: 'POST' });
                 if (data && data.status === 'ok') {
                     showToast(`✅ Sessão '${name}' removida`);
