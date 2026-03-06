@@ -234,22 +234,7 @@ class OperatorWPPClient:
             except Exception as e:
                 logger.warning(f"Delete session failed: {e}")
 
-    async def subscribe_webhook(self, webhook_url: str):
-        url = f"{self.base_url}/api/{self.session}/subscribe"
-        for payload in [
-            {"webhookUrl": webhook_url, "webhook": webhook_url},
-            {"url": webhook_url},
-        ]:
-            try:
-                async with httpx.AsyncClient(timeout=15.0) as client:
-                    resp = await client.post(url, json=payload, headers=self.headers)
-                    if resp.status_code in (200, 201):
-                        logger.info(f"Webhook subscribed: {webhook_url}")
-                        return True
-            except Exception:
-                continue
-        logger.warning("Could not subscribe webhook via API — check WPP server config")
-        return False
+
 
     async def check_session_status(self) -> dict:
         url = f"{self.base_url}/api/{self.session}/check-connection-session"
