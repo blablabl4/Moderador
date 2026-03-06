@@ -68,8 +68,8 @@ class MemoryLogHandler(logging.Handler):
 _mem_handler = MemoryLogHandler(max_entries=200)
 _mem_handler.setFormatter(logging.Formatter("%(asctime)s [OPERATOR] %(levelname)s %(message)s", datefmt="%H:%M:%S"))
 logger.addHandler(_mem_handler)
-# Also capture root logger (httpx, uvicorn, etc.)
-logging.getLogger().addHandler(_mem_handler)
+# Mute noisy HTTP request logs from httpx
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 # ── Configuration ────────────────────────────────────────────────────────────
 # Use /data volume if available (Railway persistent volume), otherwise local
@@ -196,35 +196,29 @@ class OperatorWPPClient:
                     "waitQrCode": False
                 }, headers=self.headers)
                 logger.info(f"Start Session: {resp.status_code} - {resp.text[:300]}")
+                logger.info(f"WEBHOOK URL sent to WPP: {webhook_url}")
             except Exception as e:
                 logger.error(f"Error starting session: {e}")
 
     async def subscribe_webhook(self):
-        """Explicitly subscribe to webhook events. Does NOT restart the session."""
+        """Check webhook readiness and session status.
+        NOTE: WPPConnect does NOT have a /subscribe endpoint.
+        The webhook URL must be configured in the WPP server's config.ts
+        or passed in the start-session body.
+        """
         webhook_url = os.environ.get(
             "OPERATOR_WEBHOOK_URL",
             "http://victorious-transformation.railway.internal:8001/webhook"
         )
         results = []
+        logger.info(f"WEBHOOK CONFIG: operator expects webhooks at → {webhook_url}")
+        logger.info(f"WEBHOOK CONFIG: WPP server must have webhook.url set to this URL in its config.ts")
 
         async with httpx.AsyncClient(timeout=15) as client:
-            # Method 1: POST to /subscribe
-            try:
-                url1 = f"{self.base_url}/api/{self.session}/subscribe"
-                resp = await client.post(url1, json={
-                    "webhook": webhook_url,
-                    "events": ["onMessage", "onAnyMessage", "onParticipantsChanged", "onRevokedMessage"]
-                }, headers=self.headers)
-                results.append(f"subscribe: {resp.status_code} - {resp.text[:200]}")
-                logger.info(f"Subscribe webhook: {resp.status_code} - {resp.text[:200]}")
-            except Exception as e:
-                results.append(f"subscribe: FAILED - {e}")
-                logger.warning(f"Subscribe failed: {e}")
-
             # Check session status
             try:
-                url3 = f"{self.base_url}/api/{self.session}/status-session"
-                resp = await client.get(url3, headers=self.headers)
+                url = f"{self.base_url}/api/{self.session}/status-session"
+                resp = await client.get(url, headers=self.headers)
                 results.append(f"status: {resp.status_code} - {resp.text[:200]}")
                 logger.info(f"Session status: {resp.status_code} - {resp.text[:200]}")
             except Exception as e:
@@ -232,6 +226,35 @@ class OperatorWPPClient:
                 logger.warning(f"Status check failed: {e}")
 
         return results
+
+    async def get_all_groups(self):
+        """Get all groups this session is part of."""
+        url = f"{self.base_url}/api/{self.session}/all-groups"
+        async with httpx.AsyncClient(timeout=30) as client:
+            try:
+                resp = await client.get(url, headers=self.headers)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    raw = data.get('response', data) if isinstance(data, dict) else data
+                    # Normalize to [{id, name, participants}]
+                    groups = []
+                    if isinstance(raw, list):
+                        for g in raw:
+                            gid = g.get("id", {})
+                            if isinstance(gid, dict):
+                                gid = gid.get("_serialized", "")
+                            groups.append({
+                                "id": gid,
+                                "name": g.get("name") or g.get("subject") or gid,
+                                "participants": g.get("groupMetadata", {}).get("participants", []) if isinstance(g.get("groupMetadata"), dict) else [],
+                            })
+                    logger.info(f"GET ALL GROUPS: found {len(groups)} groups")
+                    return groups
+                logger.error(f"get_all_groups: {resp.status_code} - {resp.text[:200]}")
+                return []
+            except Exception as e:
+                logger.error(f"Error getting groups: {e}")
+                return []
 
     async def close_session(self):
         """Close/kill existing session to release the browser lock."""
@@ -1032,6 +1055,21 @@ async def bots_status():
         "sessions": sessions,
         "engine": sm.aggregated_stats,
     }
+
+
+
+@app.get("/api/session/{session_name}/groups")
+async def api_session_groups(session_name: str):
+    """List all groups this operator session is part of."""
+    op = sm.get(session_name) or sm.find_by_session(session_name)
+    if not op:
+        return {"status": "error", "message": f"Session '{session_name}' not found", "groups": []}
+    try:
+        groups = await op.wpp.get_all_groups()
+        return {"status": "ok", "groups": groups, "count": len(groups)}
+    except Exception as e:
+        logger.error(f"Error fetching groups for {session_name}: {e}")
+        return {"status": "error", "message": str(e), "groups": []}
 
 
 @app.post("/api/session/{session_name}/close")

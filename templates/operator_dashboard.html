@@ -596,13 +596,20 @@
                     </div>
                     <div id="acc_cfg_${s.name}" style="display:none; font-size:12px;">
                         <div style="display:flex; flex-direction:column; gap:8px;">
+                            <button onclick="loadGroupsForBot('${s.name}')" style="padding:6px;border:none;border-radius:6px;background:#64b5f6;color:#000;font-weight:700;font-size:11px;cursor:pointer;">
+                                🔍 Carregar Grupos do WhatsApp
+                            </button>
                             <div>
-                                <label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:4px;">Grupos Destino</label>
-                                <textarea id="cfg_target_${s.name}" rows="2" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px;font-size:11px;resize:vertical;" placeholder="Um JID por linha"></textarea>
+                                <label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:4px;">📤 Grupos Destino (encaminhar para)</label>
+                                <select id="cfg_target_${s.name}" multiple size="4" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px;font-size:11px;">
+                                    <option disabled>Clique "Carregar Grupos" primeiro</option>
+                                </select>
                             </div>
                             <div>
-                                <label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:4px;">Grupos Monitorados</label>
-                                <textarea id="cfg_monitored_${s.name}" rows="2" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px;font-size:11px;resize:vertical;" placeholder="Um JID por linha"></textarea>
+                                <label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:4px;">📥 Grupos Monitorados (capturar reações de)</label>
+                                <select id="cfg_monitored_${s.name}" multiple size="4" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px;font-size:11px;">
+                                    <option disabled>Clique "Carregar Grupos" primeiro</option>
+                                </select>
                             </div>
                             <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">
                                 <div>
@@ -689,29 +696,89 @@
         }
 
         // ── Per-Bot Config ──────────────────────────────────────────────
-        async function loadBotConfig(name) {
-            // For now, load global config into each bot's fields
-            const data = await api('/config');
-            if (!data) return;
-            const el = (id) => document.getElementById(id);
-            if (el(`cfg_target_${name}`)) {
-                el(`cfg_target_${name}`).value = (data.target_groups || []).join('\n');
+        const groupsCache = {}; // Cache groups per bot session
+
+        async function loadGroupsForBot(name) {
+            showToast('Carregando grupos...');
+            const data = await api(`/api/session/${name}/groups`);
+            if (!data || !data.groups) {
+                showToast('Erro ao carregar grupos', 'error');
+                return;
             }
-            if (el(`cfg_monitored_${name}`)) {
-                el(`cfg_monitored_${name}`).value = (data.monitored_groups || []).join('\n');
+            groupsCache[name] = data.groups;
+            const groups = data.groups;
+            showToast(`✅ ${groups.length} grupos encontrados!`);
+
+            // Populate both selects
+            const targetSel = document.getElementById(`cfg_target_${name}`);
+            const monSel = document.getElementById(`cfg_monitored_${name}`);
+
+            // Get currently saved config to pre-select
+            const cfg = await api('/config');
+            const savedTargets = cfg?.target_groups || [];
+            const savedMonitored = cfg?.monitored_groups || [];
+
+            function populateSelect(sel, selectedIds) {
+                sel.innerHTML = '';
+                for (const g of groups) {
+                    const opt = document.createElement('option');
+                    opt.value = g.id;
+                    opt.textContent = `${g.name}`;
+                    if (selectedIds.includes(g.id)) opt.selected = true;
+                    sel.appendChild(opt);
+                }
+            }
+
+            if (targetSel) populateSelect(targetSel, savedTargets);
+            if (monSel) populateSelect(monSel, savedMonitored);
+
+            // Also load other config fields
+            if (cfg) {
+                const el = (id) => document.getElementById(id);
+                if (el(`cfg_modids_${name}`)) {
+                    el(`cfg_modids_${name}`).value = (cfg.moderator_bot_ids || []).join(',');
+                }
+                if (el(`cfg_emoji_${name}`)) {
+                    el(`cfg_emoji_${name}`).value = cfg.approved_emoji || '🔁';
+                }
+            }
+        }
+
+        async function loadBotConfig(name) {
+            const cfg = await api('/config');
+            if (!cfg) return;
+            const el = (id) => document.getElementById(id);
+            // If groups already loaded, pre-select; else show IDs in a disabled label
+            if (groupsCache[name]) {
+                const targetSel = el(`cfg_target_${name}`);
+                const monSel = el(`cfg_monitored_${name}`);
+                if (targetSel) {
+                    for (const opt of targetSel.options) {
+                        opt.selected = (cfg.target_groups || []).includes(opt.value);
+                    }
+                }
+                if (monSel) {
+                    for (const opt of monSel.options) {
+                        opt.selected = (cfg.monitored_groups || []).includes(opt.value);
+                    }
+                }
             }
             if (el(`cfg_modids_${name}`)) {
-                el(`cfg_modids_${name}`).value = (data.moderator_bot_ids || []).join(',');
+                el(`cfg_modids_${name}`).value = (cfg.moderator_bot_ids || []).join(',');
             }
             if (el(`cfg_emoji_${name}`)) {
-                el(`cfg_emoji_${name}`).value = data.approved_emoji || '🔁';
+                el(`cfg_emoji_${name}`).value = cfg.approved_emoji || '🔁';
             }
         }
 
         async function saveBotConfig(name) {
             const el = (id) => document.getElementById(id);
-            const tgt = (el(`cfg_target_${name}`)?.value || '').split('\n').map(s => s.trim()).filter(Boolean);
-            const mon = (el(`cfg_monitored_${name}`)?.value || '').split('\n').map(s => s.trim()).filter(Boolean);
+
+            // Read from multi-select
+            const targetSel = el(`cfg_target_${name}`);
+            const monSel = el(`cfg_monitored_${name}`);
+            const tgt = targetSel ? Array.from(targetSel.selectedOptions).map(o => o.value) : [];
+            const mon = monSel ? Array.from(monSel.selectedOptions).map(o => o.value) : [];
             const mod = (el(`cfg_modids_${name}`)?.value || '').split(',').map(s => s.trim()).filter(Boolean);
             const emoji = el(`cfg_emoji_${name}`)?.value?.trim() || '🔁';
 
@@ -729,7 +796,7 @@
             });
 
             if (data && data.status === 'ok') {
-                showToast(`✅ Config de '${name}' salva!`);
+                showToast(`✅ Config de '${name}' salva! (${tgt.length} destinos, ${mon.length} monitorados)`);
             } else {
                 showToast('❌ Erro ao salvar', 'error');
             }
