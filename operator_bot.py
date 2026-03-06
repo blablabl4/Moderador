@@ -636,6 +636,13 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Operator Bot V2", lifespan=lifespan)
 
+# Middleware: log ALL incoming requests for debugging
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    logger.info(f"📥 INCOMING REQUEST: {request.method} {request.url.path} from {request.client.host if request.client else 'unknown'}")
+    response = await call_next(request)
+    return response
+
 # Templates & static files
 os.makedirs("static", exist_ok=True)
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -1133,11 +1140,6 @@ async def close_session_api(session_name: str):
                     await client.post(f"{config['wpp_server_url']}/api/{session_name}/{endpoint}", headers=headers, timeout=8)
                 except: pass
                 await asyncio.sleep(1)
-
-            try:
-                await client.delete(f"{config['wpp_server_url']}/api/{session_name}", headers=headers, timeout=8)
-            except: pass
-
         # Also remove from SessionManager
         op = sm.find_by_session(session_name)
         if op:
