@@ -52,7 +52,7 @@ DEFAULTS = {
     "monitored_groups": ["120363424437184928@g.us"],
 
     # Moderator bot identification (phone numbers without @c.us)
-    "moderator_bot_ids": ["5511983426767"],
+    "moderator_bot_ids": ["5511983426767", "5511939482383"],
 
     # The emoji the moderator uses to approve ads
     "approved_emoji": "🔁",
