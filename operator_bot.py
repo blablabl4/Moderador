@@ -578,12 +578,21 @@ async def api_session_start():
         # 3. Switch to new session and PERSIST it
         logger.info(f"PIVOT: Switching session from '{old_session}' to '{new_session}'")
         wpp.session = new_session
-        # Save new session name to persistent config so it survives deploys
         cfg = get_cfg()
         cfg["session_name"] = new_session
         save_config(cfg)
 
-        # 4. Start brand new session (generate_token + start is inside)
+        # 4. Deep-clean the NEW session too (in case stale data exists from a previous attempt)
+        logger.info(f"PIVOT: Pre-cleaning new session '{new_session}' (prevent stale cache)...")
+        await wpp.delete_session()
+
+        # 5. Small delay for WPP Server to release Chromium resources
+        await asyncio.sleep(3)
+
+        # 6. Generate fresh token for new session name
+        await wpp.generate_token()
+
+        # 7. Start brand new session
         await wpp.start_session()
         await wpp.subscribe_webhook()
 
