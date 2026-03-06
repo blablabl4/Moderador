@@ -716,6 +716,24 @@
         // ── Per-Bot Config ──────────────────────────────────────────────
         const groupsCache = {}; // Cache groups per bot session
 
+        function populateCheckboxes(container, groups, selectedIds, prefix) {
+            container.innerHTML = '';
+            for (const g of groups) {
+                const label = document.createElement('label');
+                label.style.cssText = 'display:flex;align-items:center;gap:6px;padding:3px 0;cursor:pointer;color:var(--text);';
+                const cb = document.createElement('input');
+                cb.type = 'checkbox';
+                cb.value = g.id;
+                cb.name = prefix;
+                cb.checked = selectedIds.includes(g.id);
+                cb.style.cssText = 'accent-color:var(--green);';
+                label.appendChild(cb);
+                label.appendChild(document.createTextNode(g.name));
+                container.appendChild(label);
+            }
+            if (!groups.length) container.innerHTML = '<span style="color:var(--text-dim)">Nenhum grupo encontrado</span>';
+        }
+
         async function loadGroupsForBot(name) {
             showToast('Carregando grupos...');
             const data = await api(`/api/session/${name}/groups`);
@@ -736,26 +754,8 @@
             const savedTargets = cfg?.target_groups || [];
             const savedMonitored = cfg?.monitored_groups || [];
 
-            function populateCheckboxes(container, selectedIds, prefix) {
-                container.innerHTML = '';
-                for (const g of groups) {
-                    const label = document.createElement('label');
-                    label.style.cssText = 'display:flex;align-items:center;gap:6px;padding:3px 0;cursor:pointer;color:var(--text);';
-                    const cb = document.createElement('input');
-                    cb.type = 'checkbox';
-                    cb.value = g.id;
-                    cb.name = prefix;
-                    cb.checked = selectedIds.includes(g.id);
-                    cb.style.cssText = 'accent-color:var(--green);';
-                    label.appendChild(cb);
-                    label.appendChild(document.createTextNode(g.name));
-                    container.appendChild(label);
-                }
-                if (!groups.length) container.innerHTML = '<span style="color:var(--text-dim)">Nenhum grupo encontrado</span>';
-            }
-
-            if (targetSel) populateCheckboxes(targetSel, savedTargets, 'target');
-            if (monSel) populateCheckboxes(monSel, savedMonitored, 'monitored');
+            if (targetSel) populateCheckboxes(targetSel, groups, savedTargets, 'target');
+            if (monSel) populateCheckboxes(monSel, groups, savedMonitored, 'monitored');
 
             // Also load other config fields
             if (cfg) {
@@ -775,18 +775,12 @@
             const el = (id) => document.getElementById(id);
             // If groups already loaded, pre-select; else show IDs in a disabled label
             if (groupsCache[name]) {
+                const groups = groupsCache[name];
                 const targetDiv = el(`cfg_target_${name}`);
                 const monDiv = el(`cfg_monitored_${name}`);
-                if (targetDiv) {
-                    for (const cb of targetDiv.querySelectorAll('input[type=checkbox]')) {
-                        cb.checked = (cfg.target_groups || []).includes(cb.value);
-                    }
-                }
-                if (monDiv) {
-                    for (const cb of monDiv.querySelectorAll('input[type=checkbox]')) {
-                        cb.checked = (cfg.monitored_groups || []).includes(cb.value);
-                    }
-                }
+                // Rebuild checkboxes from cache (re-render destroyed them)
+                if (targetDiv) populateCheckboxes(targetDiv, groups, cfg.target_groups || [], 'target');
+                if (monDiv) populateCheckboxes(monDiv, groups, cfg.monitored_groups || [], 'monitored');
             }
             if (el(`cfg_modids_${name}`)) {
                 el(`cfg_modids_${name}`).value = (cfg.moderator_bot_ids || []).join(',');
