@@ -650,7 +650,7 @@ async def api_qr(session_name: str = None):
 
     # 1. Serve from webhook cache
     if qr_cache.get("qr"):
-        logger.info(f"Serving QR from cache for '{wpp.session}'")
+        logger.info(f"QR FETCH [{wpp.session}]: serving from webhook cache")
         return {"qr": qr_cache["qr"], "status": "waiting_scan", "session": wpp.session}
 
     # 2. Ensure token
@@ -660,7 +660,37 @@ async def api_qr(session_name: str = None):
         except Exception:
             return {"qr": None, "status": "no_token"}
 
-    # 3. Fallback: poll WPP Server
+    # 3. Check session status first
+    status_url = f"{wpp.base_url}/api/{wpp.session}/status-session"
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            status_resp = await client.get(status_url, headers=wpp.headers)
+            if status_resp.status_code == 200:
+                status_data = status_resp.json()
+                wpp_status = status_data.get("status", "").upper()
+                logger.info(f"QR FETCH [{wpp.session}]: session status = {wpp_status}")
+
+                # If CLOSED, restart the session
+                if wpp_status == "CLOSED":
+                    logger.info(f"QR FETCH [{wpp.session}]: session CLOSED, restarting...")
+                    webhook_url = os.environ.get(
+                        "OPERATOR_WEBHOOK_URL",
+                        "http://victorious-transformation.railway.internal:8001/webhook"
+                    )
+                    start_url = f"{wpp.base_url}/api/{wpp.session}/start-session"
+                    await client.post(start_url, json={
+                        "webhook": webhook_url,
+                        "waitQrCode": False
+                    }, headers=wpp.headers)
+                    return {"qr": None, "status": "restarting", "message": "Sessão reiniciando, aguarde..."}
+
+                # If INITIALIZING, just wait
+                if wpp_status == "INITIALIZING":
+                    logger.info(f"QR FETCH [{wpp.session}]: initializing, checking for QR...")
+    except Exception as e:
+        logger.warning(f"QR FETCH [{wpp.session}]: status check failed: {e}")
+
+    # 4. Try to get QR directly from WPP server
     url = f"{wpp.base_url}/api/{wpp.session}/qrcode-session"
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
@@ -670,21 +700,26 @@ async def api_qr(session_name: str = None):
                 resp = await client.get(url, headers=wpp.headers)
 
             content_type = resp.headers.get("content-type", "")
+            logger.info(f"QR FETCH [{wpp.session}]: qrcode-session returned {resp.status_code}, type={content_type[:30]}")
+
             if resp.status_code == 200:
                 if "image" in content_type:
                     b64 = base64.b64encode(resp.content).decode("utf-8")
                     data_uri = f"data:{content_type.split(';')[0]};base64,{b64}"
                     qr_cache["qr"] = data_uri
+                    logger.info(f"QR FETCH [{wpp.session}]: ✅ Got QR image!")
                     return {"qr": data_uri, "status": "waiting_scan", "session": wpp.session}
                 try:
                     rdata = resp.json()
                     qr_data = rdata.get("qrcode") or rdata.get("base64Qr") or rdata.get("urlCode")
                     if qr_data:
                         qr_cache["qr"] = qr_data
+                        logger.info(f"QR FETCH [{wpp.session}]: ✅ Got QR from JSON!")
                         return {"qr": qr_data, "status": "waiting_scan", "session": wpp.session}
                     wpp_status = rdata.get("status", "no_qr")
                     if "connected" in str(wpp_status).lower():
                         return {"qr": None, "status": "connected", "session": wpp.session}
+                    logger.info(f"QR FETCH [{wpp.session}]: no QR yet, WPP status={wpp_status}")
                     return {"qr": None, "status": wpp_status}
                 except Exception:
                     return {"qr": None, "status": "unknown_response"}
