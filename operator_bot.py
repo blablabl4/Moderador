@@ -753,6 +753,43 @@ def _persist_sessions():
     save_config(cfg)
 
 
+@app.post("/api/sessions/reset")
+async def api_sessions_reset():
+    """Close ALL sessions and start fresh with operator_1."""
+    config = get_cfg()
+    closed = []
+
+    for op in list(sm.all()):
+        name = op.wpp.session
+        try:
+            await op.wpp.close_session()
+        except Exception:
+            pass
+        try:
+            await op.wpp.delete_session()
+        except Exception:
+            pass
+        sm.remove(name)
+        closed.append(name)
+
+    op = sm.add("operator_1", config["wpp_server_url"], config["wpp_secret_key"])
+    try:
+        await op.wpp.generate_token()
+        await op.wpp.start_session()
+        await op.wpp.subscribe_webhook()
+    except Exception as e:
+        logger.warning(f"Reset: operator_1 started but may need QR: {e}")
+
+    _persist_sessions()
+    logger.info(f"RESET: Closed {closed}, created fresh operator_1")
+    return {
+        "status": "success",
+        "closed": closed,
+        "message": f"Reset completo! Fechados: {', '.join(closed) or 'nenhum'}. Criado: operator_1",
+        "new_session": "operator_1"
+    }
+
+
 # ── Webhook Handler ──────────────────────────────────────────────────────────
 @app.post("/webhook")
 async def receive_webhook(request: Request):
