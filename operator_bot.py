@@ -601,6 +601,9 @@ async def receive_webhook(request: Request):
     event = (data.get("event", "") or "").lower()
     config = get_cfg()
 
+    # DEBUG: Log ALL incoming webhook events
+    logger.info(f"WEBHOOK EVENT: '{event}' | Keys: {list(data.keys())[:10]} | Data preview: {json.dumps(data, default=str)[:300]}")
+
     # ── Capture QR Code from webhook ─────────────────────────────────────
     if event in ("onqrcode", "qrcode", "on-qr-code"):
         response = data.get("response") or data.get("data") or {}
