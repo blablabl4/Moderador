@@ -402,6 +402,37 @@ class OperatorWPPClient:
             logger.error(f"forward error: {e}")
         return False
 
+    async def get_messages(self, group_id: str, count: int = 20) -> list:
+        """Fetch recent messages from a group via WPP API."""
+        url = f"{self.base_url}/api/{self.session}/get-messages/{group_id}"
+        try:
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                resp = await client.get(url, headers=self.headers)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    msgs = data.get("response", data) if isinstance(data, dict) else data
+                    if isinstance(msgs, list):
+                        return msgs[-count:]  # Last N messages
+                    return []
+                return []
+        except Exception as e:
+            logger.error(f"get_messages error: {e}")
+            return []
+
+    async def get_reactions(self, message_id: str) -> list:
+        """Get reactions for a specific message."""
+        url = f"{self.base_url}/api/{self.session}/reactions/{message_id}"
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get(url, headers=self.headers)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    return data.get("response", data) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+                return []
+        except Exception as e:
+            logger.error(f"get_reactions error: {e}")
+            return []
+
     async def full_reconnect(self):
         logger.info("Full reconnect triggered...")
         await self.generate_token()
@@ -526,6 +557,123 @@ class OperatorSession:
         self.wpp = wpp_client
         self.engine = ForwardEngine()
         self.qr_cache: dict = {"qr": None, "updated_at": None}
+        self._polling_task: asyncio.Task | None = None
+
+    def start_polling(self):
+        """Start the active polling loop for this session."""
+        if self._polling_task and not self._polling_task.done():
+            return  # Already running
+        self._polling_task = asyncio.create_task(self._polling_loop())
+        logger.info(f"🔄 POLLING: started for session '{self.name}'")
+
+    def stop_polling(self):
+        """Stop the polling loop."""
+        if self._polling_task and not self._polling_task.done():
+            self._polling_task.cancel()
+            logger.info(f"🔄 POLLING: stopped for session '{self.name}'")
+
+    async def _polling_loop(self):
+        """Active polling loop: check monitored groups for emoji reactions from moderators."""
+        POLL_INTERVAL = 15  # seconds
+        # Track which messages we've already checked/forwarded
+        checked_ids: set = set()
+        MAX_CHECKED = 1000
+
+        logger.info(f"🔄 POLLING [{self.name}]: loop starting (every {POLL_INTERVAL}s)")
+
+        while True:
+            try:
+                await asyncio.sleep(POLL_INTERVAL)
+
+                config = get_cfg()
+                monitored_groups = config.get("monitored_groups", [])
+                target_groups = config.get("target_groups", [])
+                approved_emoji = config.get("approved_emoji", "🔁")
+                moderator_ids = config.get("moderator_bot_ids", [])
+
+                if not monitored_groups or not target_groups:
+                    continue  # Nothing configured
+
+                # Check connection
+                status = await self.wpp.check_session_status()
+                if not status.get("connected"):
+                    continue  # Not connected, skip
+
+                for group_id in monitored_groups:
+                    try:
+                        messages = await self.wpp.get_messages(group_id, count=30)
+                        if not messages:
+                            continue
+
+                        for msg in messages:
+                            msg_id = msg.get("id")
+                            if isinstance(msg_id, dict):
+                                msg_id = msg_id.get("_serialized", str(msg_id))
+                            msg_id = str(msg_id) if msg_id else None
+                            if not msg_id or msg_id in checked_ids:
+                                continue
+
+                            # Only check media messages (image/video)
+                            msg_type = msg.get("type", "")
+                            if msg_type not in ("image", "video"):
+                                checked_ids.add(msg_id)
+                                continue
+
+                            # Check reactions on this message
+                            reactions = await self.wpp.get_reactions(msg_id)
+                            if not reactions:
+                                continue  # No reactions yet, don't mark as checked
+
+                            # Look for the approved emoji from a moderator
+                            found_approval = False
+                            for reaction_group in reactions:
+                                # reactions can be [{emoji, users: [{id}]}] or [{id, emoji}]
+                                if isinstance(reaction_group, dict):
+                                    r_emoji = reaction_group.get("reactionText") or reaction_group.get("emoji") or reaction_group.get("msgKey", {}).get("id", "")
+                                    # Format 1: aggregated {id, reactionText, read, ...}
+                                    if r_emoji == approved_emoji:
+                                        # Check if sender is a moderator
+                                        sender = reaction_group.get("senderUserJid") or reaction_group.get("sender") or ""
+                                        if isinstance(sender, dict):
+                                            sender = sender.get("_serialized", sender.get("user", ""))
+                                        sender_num = str(sender).split("@")[0]
+                                        if sender_num in moderator_ids:
+                                            found_approval = True
+                                            break
+                                    # Format 2: {aggregateEmoji, senders: [{...}]}
+                                    agg_emoji = reaction_group.get("aggregateEmoji")
+                                    if agg_emoji == approved_emoji:
+                                        senders = reaction_group.get("senders", [])
+                                        for s in senders:
+                                            s_id = s.get("id") or s.get("_serialized") or ""
+                                            if isinstance(s_id, dict):
+                                                s_id = s_id.get("_serialized", s_id.get("user", ""))
+                                            if str(s_id).split("@")[0] in moderator_ids:
+                                                found_approval = True
+                                                break
+                                        if found_approval:
+                                            break
+
+                            checked_ids.add(msg_id)
+
+                            if found_approval:
+                                caption = msg.get("caption", "") or msg.get("body", "") or ""
+                                logger.info(f"🔄 POLLING [{self.name}]: ✅ APPROVED msg_id={msg_id[:40]} type={msg_type} caption={caption[:50]}")
+                                await self.engine.process_approved_ad(self.wpp, msg_id, group_id)
+
+                    except Exception as e:
+                        logger.error(f"🔄 POLLING [{self.name}]: error processing group {group_id[:30]}: {e}")
+
+                # Evict old checked IDs to prevent memory leak
+                if len(checked_ids) > MAX_CHECKED:
+                    checked_ids = set(list(checked_ids)[MAX_CHECKED // 2:])
+
+            except asyncio.CancelledError:
+                logger.info(f"🔄 POLLING [{self.name}]: loop cancelled")
+                break
+            except Exception as e:
+                logger.error(f"🔄 POLLING [{self.name}]: loop error: {e}")
+                await asyncio.sleep(30)  # Back off on error
 
 
 class SessionManager:
@@ -620,26 +768,35 @@ async def lifespan(app: FastAPI):
         try:
             await op.wpp.generate_token()
             await op.wpp.start_session()
-            await op.wpp.subscribe_webhook()
             await asyncio.sleep(2)
             status = await op.wpp.check_session_status()
             if status.get("connected"):
                 logger.info(f"✅ Session '{name}' auto-reconnected!")
+                op.start_polling()  # Start active polling
             else:
                 logger.info(f"Session '{name}' status: {status.get('status')}")
+                # Start polling anyway — it will wait for connection
+                op.start_polling()
         except Exception as e:
             logger.error(f"Startup error for session '{name}': {e}")
 
     yield
+    # Stop all polling tasks on shutdown
+    for op in sm.all():
+        op.stop_polling()
     logger.info("Operator bot shutdown complete")
 
 
 app = FastAPI(title="Operator Bot V2", lifespan=lifespan)
 
-# Middleware: log ALL incoming requests for debugging
+# Middleware: log important requests only (skip noisy endpoints)
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
-    logger.info(f"📥 INCOMING REQUEST: {request.method} {request.url.path} from {request.client.host if request.client else 'unknown'}")
+    path = request.url.path
+    # Skip noisy polling endpoints
+    skip_paths = ("/health", "/api/logs", "/api/bots-status", "/config", "/favicon.ico")
+    if not any(path.startswith(sp) for sp in skip_paths):
+        logger.info(f"📥 {request.method} {path} from {request.client.host if request.client else '?'}")
     response = await call_next(request)
     return response
 
@@ -773,14 +930,15 @@ async def api_session_start(session_name: str = None):
     logger.info(f"START [{name}]: Starting session...")
 
     try:
-        # Simple flow: token → start → subscribe (same as moderator)
+        # Simple flow: token → start → poll
         await op.wpp.generate_token()
         await asyncio.sleep(2)
         await op.wpp.start_session()
-        await asyncio.sleep(2)
-        await op.wpp.subscribe_webhook()
 
-        logger.info(f"START [{name}]: Session started, waiting for QR code...")
+        # Start polling for reactions (replaces webhook dependency)
+        op.start_polling()
+
+        logger.info(f"📱 START [{name}]: Session started, waiting for QR code...")
         return {
             "status": "success",
             "message": f"Sessão '{name}' iniciada! Aguarde o QR Code.",
