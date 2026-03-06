@@ -241,17 +241,37 @@ class OperatorWPPClient:
 
 
     async def check_session_status(self) -> dict:
-        url = f"{self.base_url}/api/{self.session}/check-connection-session"
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.get(url, headers=self.headers)
+        """Check if session is connected. Uses two methods for reliability."""
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            # Method 1: check-connection-session (most reliable when it works)
+            try:
+                resp = await client.get(
+                    f"{self.base_url}/api/{self.session}/check-connection-session",
+                    headers=self.headers
+                )
                 if resp.status_code == 200:
                     data = resp.json()
                     connected = data.get("response", False)
-                    return {"connected": connected, "status": "connected" if connected else "disconnected"}
-        except Exception as e:
-            logger.error(f"Session status check failed: {e}")
-        return {"connected": False, "status": "error"}
+                    if connected:
+                        return {"connected": True, "status": "CONNECTED"}
+            except Exception:
+                pass  # Fallback below
+
+            # Method 2: status-session (fallback)
+            try:
+                resp = await client.get(
+                    f"{self.base_url}/api/{self.session}/status-session",
+                    headers=self.headers
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    status = data.get("status", "CLOSED")
+                    connected = status in ("CONNECTED", "QRCODE", "INITIALIZING")
+                    return {"connected": status == "CONNECTED", "status": status}
+            except Exception as e:
+                logger.warning(f"Status check failed: {e}")
+
+        return {"connected": False, "status": "CLOSED"}
 
     async def get_messages(self, chat_id: str, count: int = 50) -> list:
         """Load recent messages from a chat/group."""
@@ -469,12 +489,15 @@ async def lifespan(app: FastAPI):
     try:
         await wpp.generate_token()
         # Try to auto-reconnect existing session (persisted across deploys)
+        # Start session will re-attach to existing browser if connected
+        await wpp.start_session()
         await wpp.subscribe_webhook()
+        await asyncio.sleep(3)  # Give WPP Server time to check browser
         status = await wpp.check_session_status()
         if status.get("connected"):
             logger.info(f"✅ Auto-reconnected to existing session '{wpp.session}'!")
         else:
-            logger.info(f"Session '{wpp.session}' not connected. Click 'Iniciar Sessão' on dashboard.")
+            logger.info(f"Session '{wpp.session}' status: {status.get('status')}. May need 'Iniciar Sessão' on dashboard.")
     except Exception as e:
         logger.error(f"Startup error: {e}")
 
