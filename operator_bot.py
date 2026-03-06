@@ -911,9 +911,13 @@ async def receive_webhook(request: Request):
         if not qr_value:
             qr_value = data.get("qrcode") or data.get("base64Qr") or data.get("urlCode")
         if qr_value and op:
-            op.qr_cache["qr"] = qr_value
+            # Ensure QR has proper data URI prefix for <img src>
+            qr_str = str(qr_value)
+            if not qr_str.startswith("data:"):
+                qr_str = f"data:image/png;base64,{qr_str}"
+            op.qr_cache["qr"] = qr_str
             op.qr_cache["updated_at"] = datetime.utcnow().isoformat()
-            logger.info(f"QR captured for session '{session_name}' ({len(str(qr_value))} chars)")
+            logger.info(f"📱 QR captured for session '{session_name}' ({len(qr_str)} chars)")
             return {"status": "qr_captured"}
         logger.warning(f"onqrcode but no QR value: {str(data)[:200]}")
         return {"status": "qr_empty"}
