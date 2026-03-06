@@ -418,8 +418,12 @@ async def lifespan(app: FastAPI):
         )
         logger.info(f"  Webhook URL: {webhook_url}")
 
-        await wpp.start_session(webhook_url=webhook_url)
+        # DON'T start session here — WPP Server may auto-start from saved data.
+        # Starting here causes "browser already running" conflict.
+        # User must click "Iniciar Sessão" on the dashboard instead.
+        # Just subscribe webhook in case session is already running.
         await wpp.subscribe_webhook(webhook_url)
+        logger.info("Ready. Click 'Iniciar Sessão' on dashboard to generate QR code.")
     except Exception as e:
         logger.error(f"Startup error: {e}")
 
