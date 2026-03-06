@@ -493,6 +493,8 @@
         }
 
         // ── Accordion ───────────────────────────────────────────────────
+        const openAccordions = new Set();
+
         function toggleAccordion(id) {
             const el = document.getElementById(id);
             if (!el) return;
@@ -500,9 +502,22 @@
             if (el.style.display === 'none') {
                 el.style.display = 'block';
                 if (arrow) arrow.textContent = '▼';
+                openAccordions.add(id);
             } else {
                 el.style.display = 'none';
                 if (arrow) arrow.textContent = '▶';
+                openAccordions.delete(id);
+            }
+        }
+
+        function restoreAccordionState() {
+            for (const id of openAccordions) {
+                const el = document.getElementById(id);
+                if (el) {
+                    el.style.display = 'block';
+                    const arrow = el.previousElementSibling?.querySelector('.acc-arrow');
+                    if (arrow) arrow.textContent = '▼';
+                }
             }
         }
 
@@ -693,6 +708,9 @@
             for (const s of sessions) {
                 loadBotConfig(s.name);
             }
+
+            // Restore open accordions after re-render
+            restoreAccordionState();
         }
 
         // ── Per-Bot Config ──────────────────────────────────────────────
