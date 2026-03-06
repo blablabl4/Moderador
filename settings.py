@@ -41,7 +41,7 @@ DEFAULTS = {
     "ad_group_seconds": 30,          # Group messages within this window as 1 "ad"
     "exclusive_groups_enabled": False,  # Prevent users from being in multiple monitored groups
     "exclusive_groups_message": "⚠️ Você já faz parte de outro grupo moderado. Só é permitido participar de um grupo por vez.",
-    "monitored_groups": ["120363406870144681@g.us"],  # ONLY this group is monitored
+    "monitored_groups": ["120363406870144681@g.us", "120363424437184928@g.us"],  # Production + Test group
     "broadcast_test_group_id": "120363424437184928@g.us",  # Grupo "Teste moderador"
     "phone_required_groups": ["120363406870144681@g.us"],  # Groups where ads must have phone number
     "phone_approved_emoji": "🔁",      # Emoji to react with on approved ads
