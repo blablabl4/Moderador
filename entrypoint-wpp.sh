@@ -2,6 +2,7 @@
 # WPPConnect Server Entrypoint
 # Patches the compiled config to inject WEBHOOK_URL from environment
 # before starting the server.
+# WEBHOOK_URL must be set as an env var on the Railway service (e.g. cozy-rejoicing)
 
 CONFIG_FILE="dist/config.js"
 
