@@ -178,50 +178,54 @@ class OperatorWPPClient:
                 return False
 
     async def start_session(self):
-        """Start the WPP session. Token must be generated first by the caller.
-        NOTE: We do NOT send 'webhook' in the body — the WPP server's config.ts
-        is patched by the entrypoint with WEBHOOK_URL (public URL).
-        This ensures req.serverOptions.webhook.url is used for ALL sessions."""
+        """Start the WPP session. Sends webhook URL in the body so WPP server
+        knows where to deliver events. Uses public URL for cross-service reliability."""
         if not self.token:
             logger.warning("start_session called without token, generating...")
             await self.generate_token()
 
+        # Public URL — works across Railway services regardless of private networking
+        webhook_url = os.environ.get(
+            "OPERATOR_WEBHOOK_URL",
+            "https://victorious-transformation-moderador.up.railway.app/webhook"
+        )
         url = f"{self.base_url}/api/{self.session}/start-session"
         async with httpx.AsyncClient(timeout=30) as client:
             try:
                 resp = await client.post(url, json={
+                    "webhook": webhook_url,
                     "waitQrCode": False
                 }, headers=self.headers)
                 logger.info(f"Start Session: {resp.status_code} - {resp.text[:300]}")
+                logger.info(f"📨 WEBHOOK URL: {webhook_url}")
             except Exception as e:
                 logger.error(f"Error starting session: {e}")
 
     async def subscribe_webhook(self):
-        """Check webhook readiness and session status.
-        NOTE: WPPConnect does NOT have a /subscribe endpoint.
-        The webhook URL must be configured in the WPP server's config.ts
-        or passed in the start-session body.
-        """
+        """Re-subscribe to webhook events (like the moderator bot does)."""
         webhook_url = os.environ.get(
             "OPERATOR_WEBHOOK_URL",
-            "http://victorious-transformation.railway.internal:8001/webhook"
+            "https://victorious-transformation-moderador.up.railway.app/webhook"
         )
-        results = []
-        logger.info(f"WEBHOOK CONFIG: operator expects webhooks at → {webhook_url}")
-        logger.info(f"WEBHOOK CONFIG: WPP server must have webhook.url set to this URL in its config.ts")
-
         async with httpx.AsyncClient(timeout=15) as client:
+            # Method 1: POST to /subscribe
+            try:
+                url = f"{self.base_url}/api/{self.session}/subscribe"
+                resp = await client.post(url, json={
+                    "webhook": webhook_url,
+                    "events": ["onMessage", "onAnyMessage", "onReactionMessage"]
+                }, headers=self.headers)
+                logger.info(f"📨 Subscribe webhook: {resp.status_code} - {resp.text[:200]}")
+            except Exception as e:
+                logger.warning(f"Subscribe failed (non-fatal): {e}")
+
             # Check session status
             try:
                 url = f"{self.base_url}/api/{self.session}/status-session"
                 resp = await client.get(url, headers=self.headers)
-                results.append(f"status: {resp.status_code} - {resp.text[:200]}")
                 logger.info(f"Session status: {resp.status_code} - {resp.text[:200]}")
             except Exception as e:
-                results.append(f"status: FAILED - {e}")
                 logger.warning(f"Status check failed: {e}")
-
-        return results
 
     async def get_all_groups(self):
         """Get all groups this session is part of."""
@@ -765,6 +769,7 @@ async def lifespan(app: FastAPI):
         try:
             await op.wpp.generate_token()
             await op.wpp.start_session()
+            await op.wpp.subscribe_webhook()
             await asyncio.sleep(2)
             status = await op.wpp.check_session_status()
             if status.get("connected"):
@@ -927,15 +932,17 @@ async def api_session_start(session_name: str = None):
     logger.info(f"START [{name}]: Starting session...")
 
     try:
-        # Simple flow: token → start → poll
+        # Full flow: token → start (with webhook URL) → subscribe → poll
         await op.wpp.generate_token()
         await asyncio.sleep(2)
         await op.wpp.start_session()
+        await asyncio.sleep(2)
+        await op.wpp.subscribe_webhook()
 
-        # Start polling for reactions (replaces webhook dependency)
+        # Start polling as safety fallback
         op.start_polling()
 
-        logger.info(f"📱 START [{name}]: Session started, waiting for QR code...")
+        logger.info(f"📱 START [{name}]: Session started with webhook + polling!")
         return {
             "status": "success",
             "message": f"Sessão '{name}' iniciada! Aguarde o QR Code.",
