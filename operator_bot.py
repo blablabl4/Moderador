@@ -673,10 +673,7 @@ async def api_qr(session_name: str = None):
     wpp = op.wpp
     qr_cache = op.qr_cache
 
-    # 1. Serve from webhook cache
-    if qr_cache.get("qr"):
-        logger.info(f"QR FETCH [{wpp.session}]: serving from webhook cache")
-        return {"qr": qr_cache["qr"], "status": "waiting_scan", "session": wpp.session}
+    # Skip webhook cache — direct fetch from WPP server gives cleaner PNG images
 
     # 2. Ensure token
     if not wpp.token:
