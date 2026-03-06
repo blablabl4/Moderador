@@ -49,16 +49,16 @@ DEFAULTS = {
     "wpp_secret_key": os.environ.get("WPP_SECRET_KEY", "THISISMYSECURETOKEN"),
 
     # Which advertiser groups this operator monitors (same ones the moderator is in)
-    "monitored_groups": [],               # e.g. ["120363406870144681@g.us"]
+    "monitored_groups": ["120363424437184928@g.us"],
 
     # Moderator bot identification (phone numbers without @c.us)
-    "moderator_bot_ids": [],              # e.g. ["5511983426767"]
+    "moderator_bot_ids": ["5511983426767"],
 
     # The emoji the moderator uses to approve ads
     "approved_emoji": "🔁",
 
     # Target groups this operator forwards approved ads to
-    "target_groups": [],                  # List of group JIDs
+    "target_groups": ["120363424437184928@g.us"],
 
     # Rate control — control volume by limiting target groups, not by delays
     "forward_delay_seconds": 0,           # 0 = no delay (testing mode)
