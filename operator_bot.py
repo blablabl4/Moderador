@@ -178,24 +178,21 @@ class OperatorWPPClient:
                 return False
 
     async def start_session(self):
-        """Start the WPP session. Token must be generated first by the caller."""
+        """Start the WPP session. Token must be generated first by the caller.
+        NOTE: We do NOT send 'webhook' in the body — the WPP server's config.ts
+        is patched by the entrypoint with WEBHOOK_URL (public URL).
+        This ensures req.serverOptions.webhook.url is used for ALL sessions."""
         if not self.token:
             logger.warning("start_session called without token, generating...")
             await self.generate_token()
 
-        webhook_url = os.environ.get(
-            "OPERATOR_WEBHOOK_URL",
-            "https://victorious-transformation-moderador.up.railway.app/webhook"
-        )
         url = f"{self.base_url}/api/{self.session}/start-session"
         async with httpx.AsyncClient(timeout=30) as client:
             try:
                 resp = await client.post(url, json={
-                    "webhook": webhook_url,
                     "waitQrCode": False
                 }, headers=self.headers)
                 logger.info(f"Start Session: {resp.status_code} - {resp.text[:300]}")
-                logger.info(f"📨 WEBHOOK URL sent to WPP: {webhook_url}")
             except Exception as e:
                 logger.error(f"Error starting session: {e}")
 
@@ -574,7 +571,7 @@ class OperatorSession:
 
     async def _polling_loop(self):
         """Active polling loop: check monitored groups for emoji reactions from moderators."""
-        POLL_INTERVAL = 15  # seconds
+        POLL_INTERVAL = 60  # seconds (safety fallback — webhooks are primary)
         # Track which messages we've already checked/forwarded
         checked_ids: set = set()
         MAX_CHECKED = 1000
