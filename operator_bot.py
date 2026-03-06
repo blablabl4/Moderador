@@ -43,7 +43,7 @@ logger = logging.getLogger("operator")
 CONFIG_FILE = os.environ.get("OPERATOR_CONFIG", "./operator_config.json")
 
 DEFAULTS = {
-    # WPPConnect Server connection (dedicated operator WPP server on Railway)
+    # WPPConnect Server — dedicated operator server on Railway
     "wpp_server_url": os.environ.get("WPP_SERVER_URL", "http://server-cli-operator.railway.internal:8080"),
     "session_name": os.environ.get("OPERATOR_SESSION", "operator_1"),
     "wpp_secret_key": os.environ.get("WPP_SECRET_KEY", "THISISMYSECURETOKEN"),
@@ -109,51 +109,93 @@ def get_cfg() -> dict:
     return _config
 
 
-# ── WPPConnect Client (minimal — operator only needs forward + read) ─────────
+# ── WPPConnect Client (EXACT CLONE of moderator's WPPConnectClient) ──────────
 class OperatorWPPClient:
 
     def __init__(self, base_url: str, session: str, secret_key: str):
-        self.base_url = base_url.rstrip("/")
+        self.base_url = base_url
         self.session = session
         self.secret_key = secret_key
         self.token = None
-        self.headers = {}
+        self.headers = {
+            "Content-Type": "application/json",
+        }
 
     async def generate_token(self):
+        """Step 1: Generate JWT token using the secret key."""
         url = f"{self.base_url}/api/{self.session}/{self.secret_key}/generate-token"
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.post(url)
-            if resp.status_code in (200, 201):
-                data = resp.json()
-                self.token = data.get("token", "")
-                self.headers = {
-                    "Authorization": f"Bearer {self.token}",
-                    "Content-Type": "application/json",
-                }
-                logger.info(f"Token generated for session '{self.session}'")
-                return True
-        logger.error(f"Failed to generate token: {resp.status_code}")
-        return False
-
-    async def start_session(self, webhook_url: str = ""):
-        if not self.token:
-            ok = await self.generate_token()
-            if not ok:
-                logger.error("Cannot start session without a valid token.")
-                return False
-        url = f"{self.base_url}/api/{self.session}/start-session"
-        payload = {"waitQrCode": False}  # Same as working moderator bot
-        if webhook_url:
-            payload["webhook"] = webhook_url
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient() as client:
             try:
-                resp = await client.post(url, json=payload, headers=self.headers)
-                logger.info(f"Start session: {resp.status_code} - {resp.text[:300]}")
-                return resp.status_code in (200, 201)
+                resp = await client.post(url)
+                logger.info(f"Generate Token: {resp.status_code} - {resp.text}")
+                if resp.status_code in (200, 201):
+                    data = resp.json()
+                    self.token = data.get("token")
+                    self.headers["Authorization"] = f"Bearer {self.token}"
+                    logger.info("Token generated successfully!")
+                    return True
+                else:
+                    logger.error(f"Failed to generate token: {resp.text}")
+                    return False
+            except Exception as e:
+                logger.error(f"Error generating token: {e}")
+                return False
+
+    async def start_session(self):
+        """Step 2: Generate token first, then start the session."""
+        token_ok = await self.generate_token()
+        if not token_ok:
+            logger.error("Cannot start session without a valid token.")
+            return
+
+        webhook_url = os.environ.get(
+            "OPERATOR_WEBHOOK_URL",
+            "http://victorious-transformation.railway.internal:8001/webhook"
+        )
+        url = f"{self.base_url}/api/{self.session}/start-session"
+        async with httpx.AsyncClient(timeout=30) as client:
+            try:
+                resp = await client.post(url, json={
+                    "webhook": webhook_url,
+                    "waitQrCode": False
+                }, headers=self.headers)
+                logger.info(f"Start Session: {resp.status_code} - {resp.text[:300]}")
             except Exception as e:
                 logger.error(f"Error starting session: {e}")
-                return False
 
+    async def subscribe_webhook(self):
+        """Explicitly subscribe to webhook events. Does NOT restart the session."""
+        webhook_url = os.environ.get(
+            "OPERATOR_WEBHOOK_URL",
+            "http://victorious-transformation.railway.internal:8001/webhook"
+        )
+        results = []
+
+        async with httpx.AsyncClient(timeout=15) as client:
+            # Method 1: POST to /subscribe
+            try:
+                url1 = f"{self.base_url}/api/{self.session}/subscribe"
+                resp = await client.post(url1, json={
+                    "webhook": webhook_url,
+                    "events": ["onMessage", "onAnyMessage", "onParticipantsChanged", "onRevokedMessage"]
+                }, headers=self.headers)
+                results.append(f"subscribe: {resp.status_code} - {resp.text[:200]}")
+                logger.info(f"Subscribe webhook: {resp.status_code} - {resp.text[:200]}")
+            except Exception as e:
+                results.append(f"subscribe: FAILED - {e}")
+                logger.warning(f"Subscribe failed: {e}")
+
+            # Check session status
+            try:
+                url3 = f"{self.base_url}/api/{self.session}/status-session"
+                resp = await client.get(url3, headers=self.headers)
+                results.append(f"status: {resp.status_code} - {resp.text[:200]}")
+                logger.info(f"Session status: {resp.status_code} - {resp.text[:200]}")
+            except Exception as e:
+                results.append(f"status: FAILED - {e}")
+                logger.warning(f"Status check failed: {e}")
+
+        return results
 
     async def close_session(self):
         """Close/kill existing session to release the browser lock."""
@@ -437,19 +479,9 @@ async def lifespan(app: FastAPI):
 
     try:
         await wpp.generate_token()
-
-        port = config.get("port", 8001)
-        webhook_url = os.environ.get(
-            "OPERATOR_WEBHOOK_URL",
-            f"http://victorious-transformation.railway.internal:{port}/webhook"
-        )
-        logger.info(f"  Webhook URL: {webhook_url}")
-
-        # DON'T start session here — WPP Server may auto-start from saved data.
-        # Starting here causes "browser already running" conflict.
-        # User must click "Iniciar Sessão" on the dashboard instead.
+        # DON'T start session here — user clicks dashboard button.
         # Just subscribe webhook in case session is already running.
-        await wpp.subscribe_webhook(webhook_url)
+        await wpp.subscribe_webhook()
         logger.info("Ready. Click 'Iniciar Sessão' on dashboard to generate QR code.")
     except Exception as e:
         logger.error(f"Startup error: {e}")
@@ -533,13 +565,6 @@ async def api_session_start():
     if not wpp:
         return {"status": "error", "message": "WPP client not initialized"}
 
-    config = get_cfg()
-    port = config.get("port", 8001)
-    webhook_url = os.environ.get(
-        "OPERATOR_WEBHOOK_URL",
-        f"http://victorious-transformation.railway.internal:{port}/webhook"
-    )
-
     old_session = wpp.session
     _qr_cache["qr"] = None
 
@@ -562,12 +587,9 @@ async def api_session_start():
         logger.info(f"PIVOT: Switching session from '{old_session}' to '{new_session}'")
         wpp.session = new_session
 
-        # 4. Generate fresh token for new session
-        await wpp.generate_token()
-
-        # 5. Start brand new session
-        await wpp.start_session(webhook_url=webhook_url)
-        await wpp.subscribe_webhook(webhook_url)
+        # 4. Start brand new session (generate_token + start is inside)
+        await wpp.start_session()
+        await wpp.subscribe_webhook()
 
         return {
             "status": "success",
