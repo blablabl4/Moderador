@@ -616,15 +616,15 @@
                             </button>
                             <div>
                                 <label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:4px;">📤 Grupos Destino (encaminhar para)</label>
-                                <select id="cfg_target_${s.name}" multiple size="4" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px;font-size:11px;">
-                                    <option disabled>Clique "Carregar Grupos" primeiro</option>
-                                </select>
+                                <div id="cfg_target_${s.name}" style="max-height:120px;overflow-y:auto;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px;font-size:11px;">
+                                    <span style="color:var(--text-dim)">Clique "Carregar Grupos" primeiro</span>
+                                </div>
                             </div>
                             <div>
                                 <label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:4px;">📥 Grupos Monitorados (capturar reações de)</label>
-                                <select id="cfg_monitored_${s.name}" multiple size="4" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px;font-size:11px;">
-                                    <option disabled>Clique "Carregar Grupos" primeiro</option>
-                                </select>
+                                <div id="cfg_monitored_${s.name}" style="max-height:120px;overflow-y:auto;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px;font-size:11px;">
+                                    <span style="color:var(--text-dim)">Clique "Carregar Grupos" primeiro</span>
+                                </div>
                             </div>
                             <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">
                                 <div>
@@ -736,19 +736,26 @@
             const savedTargets = cfg?.target_groups || [];
             const savedMonitored = cfg?.monitored_groups || [];
 
-            function populateSelect(sel, selectedIds) {
-                sel.innerHTML = '';
+            function populateCheckboxes(container, selectedIds, prefix) {
+                container.innerHTML = '';
                 for (const g of groups) {
-                    const opt = document.createElement('option');
-                    opt.value = g.id;
-                    opt.textContent = `${g.name}`;
-                    if (selectedIds.includes(g.id)) opt.selected = true;
-                    sel.appendChild(opt);
+                    const label = document.createElement('label');
+                    label.style.cssText = 'display:flex;align-items:center;gap:6px;padding:3px 0;cursor:pointer;color:var(--text);';
+                    const cb = document.createElement('input');
+                    cb.type = 'checkbox';
+                    cb.value = g.id;
+                    cb.name = prefix;
+                    cb.checked = selectedIds.includes(g.id);
+                    cb.style.cssText = 'accent-color:var(--green);';
+                    label.appendChild(cb);
+                    label.appendChild(document.createTextNode(g.name));
+                    container.appendChild(label);
                 }
+                if (!groups.length) container.innerHTML = '<span style="color:var(--text-dim)">Nenhum grupo encontrado</span>';
             }
 
-            if (targetSel) populateSelect(targetSel, savedTargets);
-            if (monSel) populateSelect(monSel, savedMonitored);
+            if (targetSel) populateCheckboxes(targetSel, savedTargets, 'target');
+            if (monSel) populateCheckboxes(monSel, savedMonitored, 'monitored');
 
             // Also load other config fields
             if (cfg) {
@@ -768,16 +775,16 @@
             const el = (id) => document.getElementById(id);
             // If groups already loaded, pre-select; else show IDs in a disabled label
             if (groupsCache[name]) {
-                const targetSel = el(`cfg_target_${name}`);
-                const monSel = el(`cfg_monitored_${name}`);
-                if (targetSel) {
-                    for (const opt of targetSel.options) {
-                        opt.selected = (cfg.target_groups || []).includes(opt.value);
+                const targetDiv = el(`cfg_target_${name}`);
+                const monDiv = el(`cfg_monitored_${name}`);
+                if (targetDiv) {
+                    for (const cb of targetDiv.querySelectorAll('input[type=checkbox]')) {
+                        cb.checked = (cfg.target_groups || []).includes(cb.value);
                     }
                 }
-                if (monSel) {
-                    for (const opt of monSel.options) {
-                        opt.selected = (cfg.monitored_groups || []).includes(opt.value);
+                if (monDiv) {
+                    for (const cb of monDiv.querySelectorAll('input[type=checkbox]')) {
+                        cb.checked = (cfg.monitored_groups || []).includes(cb.value);
                     }
                 }
             }
@@ -793,10 +800,10 @@
             const el = (id) => document.getElementById(id);
 
             // Read from multi-select
-            const targetSel = el(`cfg_target_${name}`);
-            const monSel = el(`cfg_monitored_${name}`);
-            const tgt = targetSel ? Array.from(targetSel.selectedOptions).map(o => o.value) : [];
-            const mon = monSel ? Array.from(monSel.selectedOptions).map(o => o.value) : [];
+            const targetDiv = el(`cfg_target_${name}`);
+            const monDiv = el(`cfg_monitored_${name}`);
+            const tgt = targetDiv ? Array.from(targetDiv.querySelectorAll('input[type=checkbox]:checked')).map(cb => cb.value) : [];
+            const mon = monDiv ? Array.from(monDiv.querySelectorAll('input[type=checkbox]:checked')).map(cb => cb.value) : [];
             const mod = (el(`cfg_modids_${name}`)?.value || '').split(',').map(s => s.trim()).filter(Boolean);
             const emoji = el(`cfg_emoji_${name}`)?.value?.trim() || '🔁';
 
