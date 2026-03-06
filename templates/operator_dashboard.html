@@ -383,31 +383,17 @@
     </div>
 
     <div class="container">
-        <!-- Status do Sistema -->
+        <!-- Operadores -->
         <div class="card">
-            <div class="card-header">📡 Status do Sistema</div>
+            <div class="card-header">
+                📡 Operadores
+                <span id="sysWebserver" class="status-badge status-disconnected"
+                    style="font-size:11px; padding:4px 12px;">OFFLINE</span>
+            </div>
             <div class="card-body">
-                <div style="display:flex; flex-direction:column; gap:12px; font-size:14px;">
-                    <div style="display:flex; justify-content:space-between; align-items:center;">
-                        <span>Bot Webserver</span>
-                        <span id="sysWebserver" class="status-badge status-disconnected"
-                            style="font-size:11px; padding:4px 12px;">OFFLINE</span>
-                    </div>
-                    <div style="display:flex; justify-content:space-between; align-items:center;">
-                        <span>WPP Conexão</span>
-                        <span id="sysWppConn" class="status-badge status-disconnected"
-                            style="font-size:11px; padding:4px 12px;">DESCONECTADO</span>
-                    </div>
-                    <div style="display:flex; justify-content:space-between; align-items:center;">
-                        <span>Status da Sessão</span>
-                        <span id="sysSessionStatus" class="status-badge status-disconnected"
-                            style="font-size:11px; padding:4px 12px;">UNKNOWN</span>
-                    </div>
-                    <div
-                        style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid var(--border); padding-top:10px;">
-                        <span style="color:var(--text-dim)">Sessão</span>
-                        <span id="sysSessionName" style="font-family:monospace; color:var(--accent2)">—</span>
-                    </div>
+                <div id="operatorCards"
+                    style="display:grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap:12px;">
+                    <div style="color:var(--text-dim); text-align:center; padding:20px;">Carregando sessões...</div>
                 </div>
             </div>
         </div>
@@ -594,44 +580,66 @@
             document.getElementById('statTargets').textContent = data.target_groups || 0;
         }
 
-        // ── Status do Sistema ────────────────────────────────────────────
+        // ── Operadores Panel ─────────────────────────────────────────────
         async function pollBotsStatus() {
             const data = await api('/api/bots-status');
             if (!data) return;
 
-            const op = data.operator || {};
-
-            // Bot Webserver — always ONLINE if we got a response
+            // Webserver badge
             const ws = document.getElementById('sysWebserver');
-            ws.textContent = 'ONLINE';
-            ws.className = 'status-badge status-connected';
+            if (data.webserver) {
+                ws.textContent = 'ONLINE';
+                ws.className = 'status-badge status-connected';
+            } else {
+                ws.textContent = 'OFFLINE';
+                ws.className = 'status-badge status-disconnected';
+            }
             ws.style.cssText = 'font-size:11px; padding:4px 12px;';
 
-            // WPP Conexão
-            const wc = document.getElementById('sysWppConn');
-            if (op.connected) {
-                wc.textContent = 'CONECTADO';
-                wc.className = 'status-badge status-connected';
-            } else {
-                wc.textContent = 'DESCONECTADO';
-                wc.className = 'status-badge status-disconnected';
-            }
-            wc.style.cssText = 'font-size:11px; padding:4px 12px;';
+            // Render session cards
+            const container = document.getElementById('operatorCards');
+            const sessions = data.sessions || [];
 
-            // Status da Sessão
-            const ss = document.getElementById('sysSessionStatus');
-            const statusText = (op.status || 'UNKNOWN').toUpperCase();
-            if (statusText === 'CONNECTED' || op.connected) {
-                ss.textContent = 'CONNECTED';
-                ss.className = 'status-badge status-connected';
-            } else {
-                ss.textContent = statusText;
-                ss.className = 'status-badge status-disconnected';
+            if (sessions.length === 0) {
+                container.innerHTML = '<div style="color:var(--text-dim); text-align:center; padding:20px;">Nenhuma sessão encontrada</div>';
+                return;
             }
-            ss.style.cssText = 'font-size:11px; padding:4px 12px;';
 
-            // Sessão name
-            document.getElementById('sysSessionName').textContent = op.session || '—';
+            container.innerHTML = sessions.map(s => {
+                const dotClass = s.connected ? 'on' : 'off';
+                const badgeClass = s.connected ? 'status-connected' : 'status-disconnected';
+                const statusLabel = s.connected ? 'CONNECTED' : s.status || 'DISCONNECTED';
+                const activeTag = s.active ? '<span style="background:var(--accent);color:white;font-size:9px;padding:2px 6px;border-radius:4px;margin-left:6px;">ATIVO</span>' : '';
+                const closeBtn = !s.active ? `<button onclick="closeSession('${s.name}')" style="background:var(--red);color:white;border:none;border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;margin-top:8px;">✕ Remover</button>` : '';
+
+                return `
+                    <div style="background:var(--surface2); border-radius:8px; padding:14px; border:1px solid ${s.connected ? 'var(--green)' : 'var(--border)'}; ${s.active ? 'box-shadow:0 0 8px rgba(108,92,231,0.3);' : ''}">
+                        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
+                            <span style="font-family:monospace; font-size:13px; font-weight:600;">${s.name}</span>
+                            ${activeTag}
+                        </div>
+                        <div style="display:flex; align-items:center; gap:6px;">
+                            <div class="status-dot ${dotClass}" style="width:8px;height:8px;border-radius:50%;${s.connected ? 'background:var(--green);box-shadow:0 0 8px var(--green);' : 'background:var(--red);'}"></div>
+                            <span class="${badgeClass}" style="font-size:11px; padding:3px 10px; border-radius:12px;">${statusLabel}</span>
+                        </div>
+                        ${closeBtn}
+                    </div>
+                `;
+            }).join('');
+        }
+
+        async function closeSession(name) {
+            if (!confirm(`Remover sessão "${name}"?`)) return;
+            addLog(`Removendo sessão '${name}'...`, 'info');
+            const data = await api(`/api/session/${name}/close`, { method: 'POST' });
+            if (data && data.status === 'ok') {
+                showToast(`✅ Sessão '${name}' removida`);
+                addLog(`Sessão '${name}' removida com sucesso`, 'ok');
+                pollBotsStatus(); // Refresh
+            } else {
+                showToast(`❌ Erro ao remover`, 'error');
+                addLog(`Erro: ${data?.message || '?'}`, 'err');
+            }
         }
 
         // ── QR Code ─────────────────────────────────────────────────────

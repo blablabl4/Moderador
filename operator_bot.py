@@ -808,42 +808,106 @@ async def stats():
 
 @app.get("/api/bots-status")
 async def bots_status():
-    """Return status of both moderator and operator bots."""
+    """Return status of ALL operator sessions on the WPP Server."""
     config = get_cfg()
+    active_session = wpp.session if wpp else config.get("session_name")
+    sessions = []
 
-    # Operator status (local)
-    op_status = {"connected": False, "status": "unknown"}
-    if wpp:
-        op_status = await wpp.check_session_status()
+    # Query WPP server for all sessions
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            # Generate token for listing
+            tok_resp = await client.post(
+                f"{config['wpp_server_url']}/api/mySession/{config['wpp_secret_key']}/generate-token",
+                timeout=5
+            )
+            token = tok_resp.json().get("token", "") if tok_resp.status_code in (200, 201) else ""
+            headers = {"Authorization": f"Bearer {token}"}
 
-    operator = {
-        "name": "Operador",
-        "session": wpp.session if wpp else config.get("session_name"),
-        "connected": op_status.get("connected", False),
-        "status": op_status.get("status", "unknown"),
+            # List all sessions
+            resp = await client.get(
+                f"{config['wpp_server_url']}/api/mySession/show-all-sessions",
+                headers=headers, timeout=8
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                session_list = data.get("response", data) if isinstance(data, dict) else data
+                if isinstance(session_list, list):
+                    for s in session_list:
+                        name = s if isinstance(s, str) else s.get("session", s.get("name", "?"))
+                        if not name or name == "mySession":
+                            continue
+                        # Check each session's status
+                        try:
+                            sr = await client.get(
+                                f"{config['wpp_server_url']}/api/{name}/check-connection-session",
+                                headers=headers, timeout=5
+                            )
+                            if sr.status_code == 200:
+                                connected = sr.json().get("response", False)
+                            else:
+                                connected = False
+                        except:
+                            connected = False
+
+                        sessions.append({
+                            "name": name,
+                            "connected": connected,
+                            "status": "CONNECTED" if connected else "DISCONNECTED",
+                            "active": name == active_session,
+                        })
+    except Exception as e:
+        logger.warning(f"Error listing sessions: {e}")
+
+    # If no sessions found from WPP, at least show the current one
+    if not sessions:
+        op_status = await wpp.check_session_status() if wpp else {"connected": False, "status": "CLOSED"}
+        sessions.append({
+            "name": active_session,
+            "connected": op_status.get("connected", False),
+            "status": op_status.get("status", "CLOSED"),
+            "active": True,
+        })
+
+    # Bot webserver is always online if we're responding
+    return {
+        "webserver": True,
+        "active_session": active_session,
+        "sessions": sessions,
         "engine": engine.stats,
     }
 
-    # Moderator status (remote call to moderator health endpoint)
-    moderator = {
-        "name": "Moderador",
-        "session": "?",
-        "connected": False,
-        "status": "unknown",
-    }
-    try:
-        async with httpx.AsyncClient(timeout=8.0) as client:
-            resp = await client.get("https://dezapegao.com.br/health")
-            if resp.status_code == 200:
-                data = resp.json()
-                moderator["connected"] = data.get("connected", False)
-                moderator["session"] = data.get("session", "?")
-                moderator["status"] = "CONNECTED" if data.get("connected") else "DISCONNECTED"
-                moderator["groups"] = data.get("monitored_groups", 0)
-    except Exception as e:
-        moderator["status"] = f"UNREACHABLE: {str(e)[:50]}"
 
-    return {"moderator": moderator, "operator": operator}
+@app.post("/api/session/{session_name}/close")
+async def close_session_api(session_name: str):
+    """Close and delete a specific session on the WPP server."""
+    config = get_cfg()
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            tok_resp = await client.post(
+                f"{config['wpp_server_url']}/api/{session_name}/{config['wpp_secret_key']}/generate-token",
+                timeout=5
+            )
+            token = tok_resp.json().get("token", "") if tok_resp.status_code in (200, 201) else ""
+            headers = {"Authorization": f"Bearer {token}"}
+
+            # Logout + Close + Clear
+            for endpoint in ["logout-session", "close-session", "clear-session-data"]:
+                try:
+                    await client.post(f"{config['wpp_server_url']}/api/{session_name}/{endpoint}", headers=headers, timeout=8)
+                except: pass
+                await asyncio.sleep(1)
+
+            # DELETE
+            try:
+                await client.delete(f"{config['wpp_server_url']}/api/{session_name}", headers=headers, timeout=8)
+            except: pass
+
+        logger.info(f"Session '{session_name}' closed and deleted")
+        return {"status": "ok", "message": f"Sessão '{session_name}' removida"}
+    except Exception as e:
+        logger.error(f"Error closing session {session_name}: {e}")
+        return {"status": "error", "message": str(e)}
 
 @app.get("/config")
 async def get_config_api():
