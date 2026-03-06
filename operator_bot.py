@@ -40,7 +40,11 @@ logging.basicConfig(
 logger = logging.getLogger("operator")
 
 # ── Configuration ────────────────────────────────────────────────────────────
-CONFIG_FILE = os.environ.get("OPERATOR_CONFIG", "./operator_config.json")
+# Use /data volume if available (Railway persistent volume), otherwise local
+if os.path.exists("/data") and os.access("/data", os.W_OK):
+    CONFIG_FILE = "/data/operator_config.json"
+else:
+    CONFIG_FILE = os.environ.get("OPERATOR_CONFIG", "./operator_config.json")
 
 DEFAULTS = {
     # WPPConnect Server — dedicated operator server on Railway
@@ -464,10 +468,13 @@ async def lifespan(app: FastAPI):
 
     try:
         await wpp.generate_token()
-        # DON'T start session here — user clicks dashboard button.
-        # Just subscribe webhook in case session is already running.
+        # Try to auto-reconnect existing session (persisted across deploys)
         await wpp.subscribe_webhook()
-        logger.info("Ready. Click 'Iniciar Sessão' on dashboard to generate QR code.")
+        status = await wpp.check_session_status()
+        if status.get("connected"):
+            logger.info(f"✅ Auto-reconnected to existing session '{wpp.session}'!")
+        else:
+            logger.info(f"Session '{wpp.session}' not connected. Click 'Iniciar Sessão' on dashboard.")
     except Exception as e:
         logger.error(f"Startup error: {e}")
 
@@ -568,9 +575,13 @@ async def api_session_start():
         else:
             new_session = f"{old_session}_1"
 
-        # 3. Switch to new session
+        # 3. Switch to new session and PERSIST it
         logger.info(f"PIVOT: Switching session from '{old_session}' to '{new_session}'")
         wpp.session = new_session
+        # Save new session name to persistent config so it survives deploys
+        cfg = get_cfg()
+        cfg["session_name"] = new_session
+        save_config(cfg)
 
         # 4. Start brand new session (generate_token + start is inside)
         await wpp.start_session()
@@ -762,6 +773,45 @@ async def stats():
         },
     }
 
+
+@app.get("/api/bots-status")
+async def bots_status():
+    """Return status of both moderator and operator bots."""
+    config = get_cfg()
+
+    # Operator status (local)
+    op_status = {"connected": False, "status": "unknown"}
+    if wpp:
+        op_status = await wpp.check_session_status()
+
+    operator = {
+        "name": "Operador",
+        "session": wpp.session if wpp else config.get("session_name"),
+        "connected": op_status.get("connected", False),
+        "status": op_status.get("status", "unknown"),
+        "engine": engine.stats,
+    }
+
+    # Moderator status (remote call to moderator health endpoint)
+    moderator = {
+        "name": "Moderador",
+        "session": "?",
+        "connected": False,
+        "status": "unknown",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            resp = await client.get("https://dezapegao.com.br/health")
+            if resp.status_code == 200:
+                data = resp.json()
+                moderator["connected"] = data.get("connected", False)
+                moderator["session"] = data.get("session", "?")
+                moderator["status"] = "CONNECTED" if data.get("connected") else "DISCONNECTED"
+                moderator["groups"] = data.get("monitored_groups", 0)
+    except Exception as e:
+        moderator["status"] = f"UNREACHABLE: {str(e)[:50]}"
+
+    return {"moderator": moderator, "operator": operator}
 
 @app.get("/config")
 async def get_config_api():

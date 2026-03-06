@@ -383,6 +383,60 @@
     </div>
 
     <div class="container">
+        <!-- Bot Status Panel -->
+        <div class="grid-2">
+            <div class="card" id="modStatusCard">
+                <div class="card-header">
+                    🤖 Moderador
+                    <span id="modStatusBadge" class="status-badge status-disconnected">
+                        <div class="status-dot off" id="modDot"></div>
+                        <span id="modStatusLabel">...</span>
+                    </span>
+                </div>
+                <div class="card-body">
+                    <div style="display:flex; flex-direction:column; gap:8px; font-size:13px;">
+                        <div style="display:flex; justify-content:space-between;">
+                            <span style="color:var(--text-dim)">Sessão</span>
+                            <span id="modSession" style="font-family:monospace">—</span>
+                        </div>
+                        <div style="display:flex; justify-content:space-between;">
+                            <span style="color:var(--text-dim)">Conexão</span>
+                            <span id="modConnection">—</span>
+                        </div>
+                        <div style="display:flex; justify-content:space-between;">
+                            <span style="color:var(--text-dim)">Grupos</span>
+                            <span id="modGroups">—</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="card" id="opStatusCard">
+                <div class="card-header">
+                    📡 Operador
+                    <span id="opStatusBadge" class="status-badge status-disconnected">
+                        <div class="status-dot off" id="opDot"></div>
+                        <span id="opStatusLabel">...</span>
+                    </span>
+                </div>
+                <div class="card-body">
+                    <div style="display:flex; flex-direction:column; gap:8px; font-size:13px;">
+                        <div style="display:flex; justify-content:space-between;">
+                            <span style="color:var(--text-dim)">Sessão</span>
+                            <span id="opSession" style="font-family:monospace">—</span>
+                        </div>
+                        <div style="display:flex; justify-content:space-between;">
+                            <span style="color:var(--text-dim)">Conexão</span>
+                            <span id="opConnection">—</span>
+                        </div>
+                        <div style="display:flex; justify-content:space-between;">
+                            <span style="color:var(--text-dim)">Encaminhados</span>
+                            <span id="opForwarded" style="color:var(--green)">0</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Session & QR -->
         <div class="grid-2">
             <div class="card">
@@ -565,6 +619,49 @@
             document.getElementById('statTargets').textContent = data.target_groups || 0;
         }
 
+        // ── Bots Status Panel ───────────────────────────────────────────
+        async function pollBotsStatus() {
+            const data = await api('/api/bots-status');
+            if (!data) return;
+
+            // Moderator
+            const mod = data.moderator || {};
+            const modBadge = document.getElementById('modStatusBadge');
+            const modDot = document.getElementById('modDot');
+            const modLabel = document.getElementById('modStatusLabel');
+            if (mod.connected) {
+                modBadge.className = 'status-badge status-connected';
+                modDot.className = 'status-dot on';
+                modLabel.textContent = 'Online';
+            } else {
+                modBadge.className = 'status-badge status-disconnected';
+                modDot.className = 'status-dot off';
+                modLabel.textContent = mod.status === 'unknown' ? 'Offline' : mod.status;
+            }
+            document.getElementById('modSession').textContent = mod.session || '—';
+            document.getElementById('modConnection').textContent = mod.connected ? '✅ Conectado' : '❌ Desconectado';
+            document.getElementById('modGroups').textContent = mod.groups || 0;
+
+            // Operator
+            const op = data.operator || {};
+            const opBadge = document.getElementById('opStatusBadge');
+            const opDot = document.getElementById('opDot');
+            const opLabel = document.getElementById('opStatusLabel');
+            if (op.connected) {
+                opBadge.className = 'status-badge status-connected';
+                opDot.className = 'status-dot on';
+                opLabel.textContent = 'Online';
+            } else {
+                opBadge.className = 'status-badge status-disconnected';
+                opDot.className = 'status-dot off';
+                opLabel.textContent = 'Offline';
+            }
+            document.getElementById('opSession').textContent = op.session || '—';
+            document.getElementById('opConnection').textContent = op.connected ? '✅ Conectado' : '❌ Desconectado';
+            const eng = op.engine || {};
+            document.getElementById('opForwarded').textContent = eng.total_forwarded || 0;
+        }
+
         // ── QR Code ─────────────────────────────────────────────────────
         function stopQRPoll() {
             if (qrPollTimer) {
@@ -698,7 +795,9 @@
         document.addEventListener('DOMContentLoaded', () => {
             loadConfig();
             pollHealth();
+            pollBotsStatus();
             pollInterval = setInterval(pollHealth, 5000);
+            setInterval(pollBotsStatus, 10000);
             // NOTE: Session must be started manually via "Iniciar Sessão" button
             // Auto-start was causing race conditions (browser already running error)
         });
