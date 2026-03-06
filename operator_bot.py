@@ -1130,12 +1130,27 @@ async def receive_webhook(request: Request):
         if monitored and chat_id and chat_id not in monitored:
             return {"status": "not_monitored_group"}
 
+        # Extract who reacted — WPP puts it in id.participant or senderUserJid
         sender_id = ""
-        sender_obj = response.get("sender", {}) or response.get("senderId", "")
-        if isinstance(sender_obj, dict):
-            sender_id = sender_obj.get("id", "") or sender_obj.get("_serialized", "") or sender_obj.get("user", "")
-        elif isinstance(sender_obj, str):
-            sender_id = sender_obj
+        # Priority 1: id.participant (most reliable for reactions)
+        id_obj = response.get("id") or data.get("id") or {}
+        if isinstance(id_obj, dict):
+            participant = id_obj.get("participant", "")
+            if isinstance(participant, dict):
+                sender_id = participant.get("_serialized", "") or participant.get("user", "")
+            elif isinstance(participant, str):
+                sender_id = participant
+        # Priority 2: senderUserJid (some WPP versions)
+        if not sender_id:
+            sender_id = response.get("senderUserJid") or data.get("senderUserJid") or ""
+        # Priority 3: sender field
+        if not sender_id:
+            sender_obj = response.get("sender", {}) or response.get("senderId", "")
+            if isinstance(sender_obj, dict):
+                sender_id = sender_obj.get("id", "") or sender_obj.get("_serialized", "") or sender_obj.get("user", "")
+            elif isinstance(sender_obj, str):
+                sender_id = sender_obj
+        # Priority 4: reactionBy
         if not sender_id:
             reaction_by = response.get("reactionBy", "")
             if isinstance(reaction_by, str):
@@ -1143,13 +1158,18 @@ async def receive_webhook(request: Request):
             elif isinstance(reaction_by, dict):
                 sender_id = reaction_by.get("_serialized", "") or reaction_by.get("user", "")
 
-        sender_phone = sender_id.split("@")[0] if sender_id else ""
+        sender_num = sender_id.split("@")[0] if sender_id else ""
         mod_ids = config.get("moderator_bot_ids", [])
-        if mod_ids and sender_phone not in mod_ids:
-            logger.info(f"REACTION: emoji from non-moderator {sender_phone[:15]}, ignoring")
-            return {"status": "not_moderator"}
-        if not mod_ids:
-            logger.warning(f"REACTION: no moderator_bot_ids configured")
+
+        logger.info(f"⚡ REACTION: sender_id={sender_id}, sender_num={sender_num}, mod_ids={mod_ids}")
+
+        if mod_ids and sender_num:
+            # Check both phone numbers AND LIDs in the moderator list
+            if sender_num not in mod_ids and sender_id not in mod_ids:
+                logger.info(f"⚡ REACTION: from non-moderator {sender_id[:30]}, ignoring. Add '{sender_num}' or '{sender_id}' to moderator_bot_ids if this is a moderator.")
+                return {"status": "not_moderator"}
+        elif not mod_ids:
+            logger.warning(f"⚡ REACTION: no moderator_bot_ids configured, accepting all reactions")
 
         logger.info(f"REACTION [{op.name}]: 🔁 approved ad! msg_id={reacted_msg_id[:50]}, chat={chat_id[:25]}")
 
