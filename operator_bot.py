@@ -165,6 +165,33 @@ class OperatorWPPClient:
         except Exception as e:
             logger.warning(f"Close session error (non-fatal): {e}")
 
+    async def delete_session(self):
+        """Delete session data completely (Ultra Deep Clean — same as moderator)."""
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            # 1. Logout
+            try:
+                await client.post(f"{self.base_url}/api/{self.session}/logout-session", headers=self.headers)
+                await asyncio.sleep(2)
+            except: pass
+            # 2. Close
+            try:
+                await client.post(f"{self.base_url}/api/{self.session}/close-session", headers=self.headers)
+                await asyncio.sleep(2)
+            except: pass
+            # 3. Clear session data
+            try:
+                resp = await client.post(f"{self.base_url}/api/{self.session}/clear-session-data", headers=self.headers)
+                logger.info(f"Clear Session Data: {resp.status_code}")
+                await asyncio.sleep(2)
+            except Exception as e:
+                logger.warning(f"Clear session data failed: {e}")
+            # 4. DELETE the session (final blow)
+            try:
+                resp = await client.delete(f"{self.base_url}/api/{self.session}", headers=self.headers)
+                logger.info(f"Delete Session: {resp.status_code}")
+            except Exception as e:
+                logger.warning(f"Delete session failed: {e}")
+
     async def subscribe_webhook(self, webhook_url: str):
         url = f"{self.base_url}/api/{self.session}/subscribe"
         for payload in [
@@ -500,23 +527,56 @@ async def api_qr():
 
 @app.post("/api/session/start")
 async def api_session_start():
-    """Start or restart the WPP session to generate a new QR code."""
-    if wpp:
-        config = get_cfg()
-        port = config.get("port", 8001)
-        webhook_url = os.environ.get(
-            "OPERATOR_WEBHOOK_URL",
-            f"http://victorious-transformation.railway.internal:{port}/webhook"
-        )
-        # Clear cached QR before starting fresh
-        _qr_cache["qr"] = None
-        # Close any existing session first (releases browser lock)
-        await wpp.close_session()
-        await asyncio.sleep(1)  # give Chrome time to fully exit
+    """Session Pivot: deep-delete old session, create fresh one with new ID.
+    This is the same approach the moderator uses to reliably generate QR codes.
+    """
+    if not wpp:
+        return {"status": "error", "message": "WPP client not initialized"}
+
+    config = get_cfg()
+    port = config.get("port", 8001)
+    webhook_url = os.environ.get(
+        "OPERATOR_WEBHOOK_URL",
+        f"http://victorious-transformation.railway.internal:{port}/webhook"
+    )
+
+    old_session = wpp.session
+    _qr_cache["qr"] = None
+
+    try:
+        # 1. Ultra Deep Clean of old session
+        logger.info(f"PIVOT: Deep-cleaning old session '{old_session}'...")
+        await wpp.delete_session()
+
+        # 2. Increment session ID (operator_1 -> operator_2)
+        import re
+        match = re.search(r'(\d+)$', old_session)
+        if match:
+            num = int(match.group(1))
+            base = old_session[:match.start()]
+            new_session = f"{base}{num + 1}"
+        else:
+            new_session = f"{old_session}_1"
+
+        # 3. Switch to new session
+        logger.info(f"PIVOT: Switching session from '{old_session}' to '{new_session}'")
+        wpp.session = new_session
+
+        # 4. Generate fresh token for new session
         await wpp.generate_token()
+
+        # 5. Start brand new session
         await wpp.start_session(webhook_url=webhook_url)
-        return {"status": "success", "message": "Sessão iniciada! Aguarde o QR Code."}
-    return {"status": "error", "message": "WPP client not initialized"}
+        await wpp.subscribe_webhook(webhook_url)
+
+        return {
+            "status": "success",
+            "message": f"Sessão '{new_session}' criada! Aguarde o QR Code.",
+            "new_session": new_session
+        }
+    except Exception as e:
+        logger.error(f"Session pivot error: {e}")
+        return {"status": "error", "message": str(e)}
 
 
 # ── Webhook Handler ──────────────────────────────────────────────────────────
