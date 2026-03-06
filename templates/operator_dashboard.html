@@ -421,66 +421,6 @@
                 </div>
             </div>
         </div>
-
-        <!-- Config -->
-        <div class="card">
-            <div class="card-header">
-                ⚙️ Configuração
-                <button class="btn btn-success" onclick="saveConfig()">💾 Salvar</button>
-            </div>
-            <div class="card-body">
-                <div class="config-form">
-                    <div class="grid-2">
-                        <div class="field">
-                            <label>Grupos Monitorados (anunciantes)</label>
-                            <textarea id="cfgMonitoredGroups"
-                                placeholder="Um JID por linha&#10;120363406870144681@g.us"></textarea>
-                            <div class="hint">Grupos onde o moderador está. Um JID por linha.</div>
-                        </div>
-                        <div class="field">
-                            <label>Grupos Destino (encaminhar para)</label>
-                            <textarea id="cfgTargetGroups"
-                                placeholder="Um JID por linha&#10;120363408281153077@g.us"></textarea>
-                            <div class="hint">Grupos que vão receber os anúncios. Controle o volume aqui.</div>
-                        </div>
-                    </div>
-                    <div class="grid-2">
-                        <div class="field">
-                            <label>IDs dos Bots Moderadores</label>
-                            <input type="text" id="cfgModeratorIds" placeholder="5511983426767,5511981771974">
-                            <div class="hint">Telefones dos moderadores, separados por vírgula.</div>
-                        </div>
-                        <div class="field">
-                            <label>Emoji Aprovação</label>
-                            <input type="text" id="cfgEmoji" placeholder="🔁" style="width: 80px;">
-                        </div>
-                    </div>
-                    <div class="grid-2">
-                        <div class="field">
-                            <label>Delay entre Forwards (segundos)</label>
-                            <input type="number" id="cfgDelay" placeholder="0" min="0">
-                            <div class="hint">0 = sem delay (modo teste)</div>
-                        </div>
-                        <div class="field">
-                            <label>Máximo Forwards / Hora</label>
-                            <input type="number" id="cfgMaxPerHour" placeholder="0" min="0">
-                            <div class="hint">0 = ilimitado (modo teste)</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Activity Log -->
-        <div class="card">
-            <div class="card-header">
-                📋 Log de Atividade
-                <button class="btn btn-outline" onclick="clearLog()">Limpar</button>
-            </div>
-            <div class="card-body">
-                <div class="log-area" id="logArea">Aguardando atividade...\n</div>
-            </div>
-        </div>
     </div>
 
     <div class="toast" id="toast"></div>
@@ -488,9 +428,9 @@
     <script>
         const BASE = window.location.origin;
         let pollInterval = null;
-        const qrPollers = {}; // per-session QR pollers
+        const qrPollers = {};
+        const qrStateCache = {}; // Preserve QR images across re-renders
 
-        // ── Toast ───────────────────────────────────────────────────────
         function showToast(msg, type = 'success') {
             const t = document.getElementById('toast');
             t.textContent = msg;
@@ -498,30 +438,17 @@
             setTimeout(() => t.classList.remove('show'), 3000);
         }
 
-        // ── Log ─────────────────────────────────────────────────────────
-        function addLog(msg, cls = '') {
-            const log = document.getElementById('logArea');
-            const time = new Date().toLocaleTimeString('pt-BR');
-            const span = cls ? `<span class="${cls}">${msg}</span>` : msg;
-            log.innerHTML += `[${time}] ${span}\n`;
-            log.scrollTop = log.scrollHeight;
-        }
-        function clearLog() {
-            document.getElementById('logArea').innerHTML = '';
-        }
-
-        // ── Fetch helpers ───────────────────────────────────────────────
         async function api(url, opts = {}) {
             try {
                 const res = await fetch(BASE + url, opts);
                 return await res.json();
             } catch (e) {
-                addLog(`Erro: ${e.message}`, 'err');
+                console.error(`API error: ${e.message}`);
                 return null;
             }
         }
 
-        // ── Health / Stats Polling ──────────────────────────────────────
+        // ── Health / Stats ──────────────────────────────────────────────
         async function pollHealth() {
             const data = await api('/health');
             if (!data) return;
@@ -550,68 +477,68 @@
             document.getElementById('statTargets').textContent = data.target_groups || 0;
         }
 
-        // ── Operator Cards ──────────────────────────────────────────────
+        // ── Accordion ───────────────────────────────────────────────────
         function toggleAccordion(id) {
             const el = document.getElementById(id);
+            if (!el) return;
             const arrow = el.previousElementSibling.querySelector('.acc-arrow');
             if (el.style.display === 'none') {
                 el.style.display = 'block';
-                arrow.textContent = '▼';
+                if (arrow) arrow.textContent = '▼';
             } else {
                 el.style.display = 'none';
-                arrow.textContent = '▶';
+                if (arrow) arrow.textContent = '▶';
             }
         }
 
+        // ── Operator Card Rendering ─────────────────────────────────────
         function renderOperatorCard(s) {
             const borderColor = s.connected ? 'var(--green)' : 'var(--border)';
             const glow = s.connected ? 'box-shadow:0 0 12px rgba(0,206,117,0.3);' : '';
-            const activeTag = s.active ? '<span style="background:var(--accent);color:white;font-size:9px;padding:2px 6px;border-radius:4px;">ATIVO</span>' : '';
             const connBadge = s.connected
                 ? '<span class="status-badge status-connected" style="font-size:11px;padding:3px 10px;">CONECTADO</span>'
                 : '<span class="status-badge status-disconnected" style="font-size:11px;padding:3px 10px;">DESCONECTADO</span>';
-            const wppBadge = s.connected
-                ? '<span class="status-badge status-connected" style="font-size:10px;padding:3px 10px;">CONECTADO</span>'
-                : '<span class="status-badge status-disconnected" style="font-size:10px;padding:3px 10px;">DESCONECTADO</span>';
-            const statusBadge = s.connected
-                ? '<span class="status-badge status-connected" style="font-size:10px;padding:3px 10px;">CONNECTED</span>'
-                : `<span class="status-badge status-disconnected" style="font-size:10px;padding:3px 10px;">${s.status || 'DISCONNECTED'}</span>`;
+
+            // QR area — use cached state if available
+            let qrContent;
+            if (qrStateCache[s.name]) {
+                qrContent = qrStateCache[s.name];
+            } else if (s.connected) {
+                qrContent = '<div style="color:var(--green);font-size:14px;">✅ Sessão conectada</div>';
+            } else {
+                qrContent = '<div style="color:var(--text-dim);font-size:13px;">Clique "Iniciar / Reconectar" para gerar QR</div>';
+            }
+
+            // Per-bot stats
+            const st = s.stats || {};
 
             return `
             <div class="card" style="border:1px solid ${borderColor}; ${glow}">
                 <div class="card-header" style="display:flex; align-items:center; justify-content:space-between;">
-                    <span>📡 ${s.name} ${activeTag}</span>
+                    <span>📡 ${s.name}</span>
                     ${connBadge}
                 </div>
                 <div class="card-body" style="display:flex; flex-direction:column; gap:12px;">
 
                     <!-- QR Area -->
                     <div id="qr_${s.name}" style="background:var(--surface2); border-radius:8px; padding:16px; text-align:center; min-height:80px;">
-                        ${s.connected
-                            ? '<div style="color:var(--green);font-size:14px;">✅ Sessão conectada</div>'
-                            : '<div style="color:var(--text-dim);font-size:13px;">Clique "Iniciar / Reconectar" para gerar QR</div>'}
+                        ${qrContent}
                     </div>
 
-                    <!-- Accordion: Status do Sistema -->
+                    <!-- Accordion: Status -->
                     <div class="acc-header" onclick="toggleAccordion('acc_status_${s.name}')" style="cursor:pointer; display:flex; align-items:center; gap:8px; padding:8px 0; border-bottom:1px solid var(--border);">
                         <span class="acc-arrow" style="font-size:10px;color:var(--text-dim);">▶</span>
-                        <span style="font-size:13px; font-weight:600;">📋 Status do Sistema</span>
+                        <span style="font-size:13px; font-weight:600;">📋 Status</span>
                     </div>
                     <div id="acc_status_${s.name}" style="display:none; font-size:13px;">
                         <div style="display:flex; flex-direction:column; gap:8px;">
-                            <div style="display:flex; justify-content:space-between; align-items:center;">
-                                <span>Bot Webserver</span>
-                                <span class="status-badge status-connected" style="font-size:10px;padding:3px 10px;">ONLINE</span>
-                            </div>
-                            <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <div style="display:flex; justify-content:space-between;">
                                 <span>WPP Conexão</span>
-                                ${wppBadge}
+                                ${s.connected
+                                    ? '<span class="status-badge status-connected" style="font-size:10px;padding:3px 10px;">CONECTADO</span>'
+                                    : '<span class="status-badge status-disconnected" style="font-size:10px;padding:3px 10px;">DESCONECTADO</span>'}
                             </div>
-                            <div style="display:flex; justify-content:space-between; align-items:center;">
-                                <span>Status da Sessão</span>
-                                ${statusBadge}
-                            </div>
-                            <div style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid var(--border); padding-top:6px;">
+                            <div style="display:flex; justify-content:space-between; border-top:1px solid var(--border); padding-top:6px;">
                                 <span style="color:var(--text-dim)">Sessão</span>
                                 <span style="font-family:monospace; color:var(--accent2)">${s.name}</span>
                             </div>
@@ -626,25 +553,56 @@
                     <div id="acc_stats_${s.name}" style="display:none;">
                         <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; font-size:12px;">
                             <div style="background:var(--surface2);border-radius:6px;padding:10px;text-align:center;">
-                                <div style="font-size:18px;font-weight:700;color:var(--green);">0</div>
+                                <div style="font-size:18px;font-weight:700;color:var(--green);">${st.total_forwarded || 0}</div>
                                 <div style="color:var(--text-dim);font-size:11px;">Encaminhados</div>
                             </div>
                             <div style="background:var(--surface2);border-radius:6px;padding:10px;text-align:center;">
-                                <div style="font-size:18px;font-weight:700;color:var(--red);">0</div>
+                                <div style="font-size:18px;font-weight:700;color:var(--red);">${st.total_failed || 0}</div>
                                 <div style="color:var(--text-dim);font-size:11px;">Falhas</div>
                             </div>
                             <div style="background:var(--surface2);border-radius:6px;padding:10px;text-align:center;">
-                                <div style="font-size:18px;font-weight:700;">0</div>
+                                <div style="font-size:18px;font-weight:700;">${st.total_ads_detected || 0}</div>
                                 <div style="color:var(--text-dim);font-size:11px;">Anúncios</div>
                             </div>
                             <div style="background:var(--surface2);border-radius:6px;padding:10px;text-align:center;">
-                                <div style="font-size:18px;font-weight:700;color:var(--yellow);">0</div>
+                                <div style="font-size:18px;font-weight:700;color:var(--yellow);">${st.forwards_this_hour || 0}</div>
                                 <div style="color:var(--text-dim);font-size:11px;">Esta Hora</div>
                             </div>
                         </div>
                     </div>
 
-                    <!-- Controle da Sessão -->
+                    <!-- Accordion: Configuração do Bot -->
+                    <div class="acc-header" onclick="toggleAccordion('acc_cfg_${s.name}')" style="cursor:pointer; display:flex; align-items:center; gap:8px; padding:8px 0; border-bottom:1px solid var(--border);">
+                        <span class="acc-arrow" style="font-size:10px;color:var(--text-dim);">▶</span>
+                        <span style="font-size:13px; font-weight:600;">⚙️ Configuração</span>
+                    </div>
+                    <div id="acc_cfg_${s.name}" style="display:none; font-size:12px;">
+                        <div style="display:flex; flex-direction:column; gap:8px;">
+                            <div>
+                                <label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:4px;">Grupos Destino</label>
+                                <textarea id="cfg_target_${s.name}" rows="2" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px;font-size:11px;resize:vertical;" placeholder="Um JID por linha"></textarea>
+                            </div>
+                            <div>
+                                <label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:4px;">Grupos Monitorados</label>
+                                <textarea id="cfg_monitored_${s.name}" rows="2" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px;font-size:11px;resize:vertical;" placeholder="Um JID por linha"></textarea>
+                            </div>
+                            <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">
+                                <div>
+                                    <label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:4px;">IDs Moderadores</label>
+                                    <input id="cfg_modids_${s.name}" type="text" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px;font-size:11px;" placeholder="5511...">
+                                </div>
+                                <div>
+                                    <label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:4px;">Emoji</label>
+                                    <input id="cfg_emoji_${s.name}" type="text" style="width:60px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px;font-size:11px;" value="🔁">
+                                </div>
+                            </div>
+                            <button onclick="saveBotConfig('${s.name}')" style="padding:8px;border:none;border-radius:6px;background:var(--accent);color:white;font-weight:700;font-size:12px;cursor:pointer;">
+                                💾 Salvar Config
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Session Controls -->
                     <div style="display:flex; flex-direction:column; gap:6px; margin-top:4px;">
                         <button onclick="sessionAction('${s.name}','start')" style="width:100%;padding:10px;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer;background:#00b894;color:white;">
                             ▶ Iniciar / Reconectar
@@ -680,24 +638,84 @@
             const grid = document.getElementById('operatorGrid');
             const sessions = data.sessions || [];
 
+            // Save QR state before re-render
+            for (const s of sessions) {
+                const el = document.getElementById(`qr_${s.name}`);
+                if (el && el.querySelector('img')) {
+                    qrStateCache[s.name] = el.innerHTML;
+                }
+                // Clear QR cache if session is now connected
+                if (s.connected && qrStateCache[s.name] && !qrStateCache[s.name].includes('conectada')) {
+                    qrStateCache[s.name] = '<div style="color:var(--green);font-size:14px;">✅ Sessão conectada</div>';
+                }
+            }
+
             let html = '';
             for (const s of sessions) {
                 html += renderOperatorCard(s);
             }
             html += renderAddCard();
             grid.innerHTML = html;
+
+            // Load config into per-bot fields
+            for (const s of sessions) {
+                loadBotConfig(s.name);
+            }
+        }
+
+        // ── Per-Bot Config ──────────────────────────────────────────────
+        async function loadBotConfig(name) {
+            // For now, load global config into each bot's fields
+            const data = await api('/config');
+            if (!data) return;
+            const el = (id) => document.getElementById(id);
+            if (el(`cfg_target_${name}`)) {
+                el(`cfg_target_${name}`).value = (data.target_groups || []).join('\n');
+            }
+            if (el(`cfg_monitored_${name}`)) {
+                el(`cfg_monitored_${name}`).value = (data.monitored_groups || []).join('\n');
+            }
+            if (el(`cfg_modids_${name}`)) {
+                el(`cfg_modids_${name}`).value = (data.moderator_bot_ids || []).join(',');
+            }
+            if (el(`cfg_emoji_${name}`)) {
+                el(`cfg_emoji_${name}`).value = data.approved_emoji || '🔁';
+            }
+        }
+
+        async function saveBotConfig(name) {
+            const el = (id) => document.getElementById(id);
+            const tgt = (el(`cfg_target_${name}`)?.value || '').split('\n').map(s => s.trim()).filter(Boolean);
+            const mon = (el(`cfg_monitored_${name}`)?.value || '').split('\n').map(s => s.trim()).filter(Boolean);
+            const mod = (el(`cfg_modids_${name}`)?.value || '').split(',').map(s => s.trim()).filter(Boolean);
+            const emoji = el(`cfg_emoji_${name}`)?.value?.trim() || '🔁';
+
+            const payload = {
+                target_groups: tgt,
+                monitored_groups: mon,
+                moderator_bot_ids: mod,
+                approved_emoji: emoji,
+            };
+
+            const data = await api('/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+
+            if (data && data.status === 'ok') {
+                showToast(`✅ Config de '${name}' salva!`);
+            } else {
+                showToast('❌ Erro ao salvar', 'error');
+            }
         }
 
         // ── Session Actions ─────────────────────────────────────────────
         async function sessionAction(name, action) {
-            addLog(`${action} sessão '${name}'...`, 'info');
-
             if (action === 'start') {
                 const data = await api(`/api/session/${name}/start`, { method: 'POST' });
                 if (data) {
                     showToast(data.message || 'Sessão iniciada!');
-                    addLog(data.message || 'Sessão iniciada', 'ok');
-                    // Poll QR for the NEW session name (may have changed after pivot)
                     startQRPollFor(data.new_session || name);
                     setTimeout(pollBotsStatus, 2000);
                 }
@@ -705,22 +723,19 @@
                 if (!confirm(`${action === 'close' ? 'Fechar' : 'Deslogar'} sessão "${name}"?`)) return;
                 const data = await api(`/api/session/${name}/close`, { method: 'POST' });
                 if (data && data.status === 'ok') {
-                    showToast(`✅ Sessão '${name}' ${action === 'close' ? 'fechada' : 'deslogada'}`);
-                    addLog(`Sessão '${name}' removida`, 'ok');
+                    showToast(`✅ Sessão '${name}' removida`);
+                    delete qrStateCache[name];
                     pollBotsStatus();
                 } else {
                     showToast('❌ Erro', 'error');
-                    addLog(`Erro: ${data?.message || '?'}`, 'err');
                 }
             }
         }
 
         async function addNewOperator() {
-            addLog('Criando novo operador...', 'info');
             const data = await api('/api/session/new', { method: 'POST' });
             if (data && data.status === 'success') {
                 showToast(data.message || 'Novo operador criado!');
-                addLog(data.message || 'Novo operador', 'ok');
                 await pollBotsStatus();
                 if (data.new_session) {
                     startQRPollFor(data.new_session);
@@ -730,7 +745,7 @@
             }
         }
 
-        // ── QR Code per session ─────────────────────────────────────────
+        // ── QR Code per session (40 attempts = 120s) ────────────────────
         function stopQRPollFor(name) {
             if (qrPollers[name]) {
                 clearInterval(qrPollers[name].timer);
@@ -742,103 +757,60 @@
             stopQRPollFor(name);
             let count = 0;
             const area = document.getElementById(`qr_${name}`);
-            if (area) area.innerHTML = '<div style="color:var(--yellow);font-size:13px;">⏳ Aguardando QR Code...</div>';
+            const waitingHtml = '<div style="color:var(--yellow);font-size:13px;">⏳ Aguardando QR Code...</div>';
+            if (area) area.innerHTML = waitingHtml;
+            qrStateCache[name] = waitingHtml;
 
             qrPollers[name] = { timer: setInterval(async () => {
                 count++;
-                if (count > 20) {
+                if (count > 40) {
                     stopQRPollFor(name);
+                    const msg = '<div style="color:var(--red);font-size:13px;">Timeout — tente novamente</div>';
                     const a = document.getElementById(`qr_${name}`);
-                    if (a) a.innerHTML = '<div style="color:var(--red);font-size:13px;">Timeout — tente novamente</div>';
+                    if (a) a.innerHTML = msg;
+                    qrStateCache[name] = msg;
                     return;
                 }
-                addLog(`[${name}] Buscando QR... (${count})`, 'info');
                 const data = await api(`/api/session/${name}/qr`);
                 const a = document.getElementById(`qr_${name}`);
-                if (!a) { stopQRPollFor(name); return; }
                 if (data && data.qr) {
-                    a.innerHTML = `<img src="${data.qr}" alt="QR" style="max-width:100%;border-radius:8px;">`;
-                    addLog(`[${name}] ✅ QR carregado!`, 'ok');
+                    const imgHtml = `<img src="${data.qr}" alt="QR" style="max-width:100%;border-radius:8px;">`;
+                    if (a) a.innerHTML = imgHtml;
+                    qrStateCache[name] = imgHtml;
                     showToast('QR Code pronto!');
                     stopQRPollFor(name);
                 } else if (data && data.status === 'connected') {
-                    a.innerHTML = '<div style="color:var(--green);font-size:14px;">✅ Sessão conectada</div>';
+                    const connHtml = '<div style="color:var(--green);font-size:14px;">✅ Sessão conectada</div>';
+                    if (a) a.innerHTML = connHtml;
+                    qrStateCache[name] = connHtml;
                     stopQRPollFor(name);
                 } else {
-                    a.innerHTML = `<div style="color:var(--yellow);font-size:13px;">⏳ ${data?.status || 'aguardando'}... (${count}/20)</div>`;
+                    const waitHtml = `<div style="color:var(--yellow);font-size:13px;">⏳ ${data?.status || 'aguardando'}... (${count}/40)</div>`;
+                    if (a) a.innerHTML = waitHtml;
+                    qrStateCache[name] = waitHtml;
                 }
             }, 3000)};
         }
 
         async function fetchQRFor(name) {
-            addLog(`[${name}] Buscando QR...`, 'info');
             const data = await api(`/api/session/${name}/qr`);
             const area = document.getElementById(`qr_${name}`);
             if (!area) return;
             if (data && data.qr) {
-                area.innerHTML = `<img src="${data.qr}" alt="QR" style="max-width:100%;border-radius:8px;">`;
-                addLog(`[${name}] QR carregado!`, 'ok');
+                const imgHtml = `<img src="${data.qr}" alt="QR" style="max-width:100%;border-radius:8px;">`;
+                area.innerHTML = imgHtml;
+                qrStateCache[name] = imgHtml;
             } else if (data && data.status === 'connected') {
-                area.innerHTML = '<div style="color:var(--green);font-size:14px;">✅ Sessão conectada</div>';
+                const h = '<div style="color:var(--green);font-size:14px;">✅ Sessão conectada</div>';
+                area.innerHTML = h;
+                qrStateCache[name] = h;
             } else {
                 area.innerHTML = `<div style="color:var(--text-dim);font-size:13px;">Status: ${data?.status || 'erro'}</div>`;
             }
         }
 
-        // ── Config ──────────────────────────────────────────────────────
-        async function loadConfig() {
-            const data = await api('/config');
-            if (!data) return;
-
-            document.getElementById('cfgMonitoredGroups').value =
-                (data.monitored_groups || []).join('\n');
-            document.getElementById('cfgTargetGroups').value =
-                (data.target_groups || []).join('\n');
-            document.getElementById('cfgModeratorIds').value =
-                (data.moderator_bot_ids || []).join(',');
-            document.getElementById('cfgEmoji').value = data.approved_emoji || '🔁';
-            document.getElementById('cfgDelay').value = data.forward_delay_seconds ?? 0;
-            document.getElementById('cfgMaxPerHour').value = data.max_forwards_per_hour ?? 0;
-        }
-
-        async function saveConfig() {
-            const monGroups = document.getElementById('cfgMonitoredGroups').value
-                .split('\n').map(s => s.trim()).filter(Boolean);
-            const tgtGroups = document.getElementById('cfgTargetGroups').value
-                .split('\n').map(s => s.trim()).filter(Boolean);
-            const modIds = document.getElementById('cfgModeratorIds').value
-                .split(',').map(s => s.trim()).filter(Boolean);
-            const emoji = document.getElementById('cfgEmoji').value.trim() || '🔁';
-            const delay = parseInt(document.getElementById('cfgDelay').value) || 0;
-            const maxH = parseInt(document.getElementById('cfgMaxPerHour').value) || 0;
-
-            const payload = {
-                monitored_groups: monGroups,
-                target_groups: tgtGroups,
-                moderator_bot_ids: modIds,
-                approved_emoji: emoji,
-                forward_delay_seconds: delay,
-                max_forwards_per_hour: maxH,
-            };
-
-            const data = await api('/config', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload),
-            });
-
-            if (data && data.status === 'ok') {
-                showToast('✅ Configuração salva!');
-                addLog('Configuração salva com sucesso', 'ok');
-            } else {
-                showToast('❌ Erro ao salvar', 'error');
-                addLog(`Erro ao salvar: ${data?.message || '?'}`, 'err');
-            }
-        }
-
         // ── Init ────────────────────────────────────────────────────────
         document.addEventListener('DOMContentLoaded', () => {
-            loadConfig();
             pollHealth();
             pollBotsStatus();
             pollInterval = setInterval(pollHealth, 5000);

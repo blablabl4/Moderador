@@ -710,14 +710,17 @@ async def api_session_new():
     """Create a brand NEW operator session alongside existing ones."""
     config = get_cfg()
 
-    # Find next available operator number
-    existing_nums = []
+    # Find lowest available operator number (starting from 1)
+    import re
+    existing_nums = set()
     for op in sm.all():
-        import re
         m = re.search(r'(\d+)$', op.wpp.session)
         if m:
-            existing_nums.append(int(m.group(1)))
-    next_num = max(existing_nums, default=0) + 1
+            existing_nums.add(int(m.group(1)))
+    # Find first gap starting from 1
+    next_num = 1
+    while next_num in existing_nums:
+        next_num += 1
     new_name = f"operator_{next_num}"
 
     try:
