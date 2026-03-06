@@ -178,11 +178,10 @@ class OperatorWPPClient:
                 return False
 
     async def start_session(self):
-        """Step 2: Generate token first, then start the session."""
-        token_ok = await self.generate_token()
-        if not token_ok:
-            logger.error("Cannot start session without a valid token.")
-            return
+        """Start the WPP session. Token must be generated first by the caller."""
+        if not self.token:
+            logger.warning("start_session called without token, generating...")
+            await self.generate_token()
 
         webhook_url = os.environ.get(
             "OPERATOR_WEBHOOK_URL",
@@ -732,11 +731,9 @@ async def api_qr(session_name: str = None):
 @app.post("/api/session/start")
 @app.post("/api/session/{session_name}/start")
 async def api_session_start(session_name: str = None):
-    """Session Pivot: create or restart an operator session.
-    If session_name provided, pivots that specific session.
-    Otherwise, pivots the first available session.
+    """Start or reconnect an operator session. Simple flow like the moderator bot:
+    generate_token → start_session → subscribe_webhook. No renaming, no pivoting.
     """
-    import re
     config = get_cfg()
 
     # Find or create session
@@ -746,52 +743,28 @@ async def api_session_start(session_name: str = None):
     if not op:
         op = sm.get_first()
     if not op:
-        # No sessions at all — create first one
         op = sm.add("operator_1", config["wpp_server_url"], config["wpp_secret_key"])
 
-    old_session = op.wpp.session
+    name = op.wpp.session
     op.qr_cache["qr"] = None
+    logger.info(f"START [{name}]: Starting session...")
 
     try:
-        # 1. Deep Clean old session
-        logger.info(f"PIVOT [{op.name}]: Deep-cleaning old session '{old_session}'...")
-        await op.wpp.delete_session()
-
-        # 2. Increment session ID
-        match = re.search(r'(\d+)$', old_session)
-        if match:
-            num = int(match.group(1))
-            base = old_session[:match.start()]
-            new_session = f"{base}{num + 1}"
-        else:
-            new_session = f"{old_session}_1"
-
-        # 3. Switch to new session
-        logger.info(f"PIVOT [{op.name}]: Switching '{old_session}' → '{new_session}'")
-        op.wpp.session = new_session
-
-        # 4. Update SessionManager key
-        sm.sessions.pop(op.name, None)
-        op.name = new_session
-        sm.sessions[new_session] = op
-
-        # 5. Persist sessions to config
-        _persist_sessions()
-
-        # 6. Pre-clean new session + start
-        await op.wpp.delete_session()
-        await asyncio.sleep(3)
+        # Simple flow: token → start → subscribe (same as moderator)
         await op.wpp.generate_token()
+        await asyncio.sleep(2)
         await op.wpp.start_session()
+        await asyncio.sleep(2)
         await op.wpp.subscribe_webhook()
 
+        logger.info(f"START [{name}]: Session started, waiting for QR code...")
         return {
             "status": "success",
-            "message": f"Sessão '{new_session}' criada! Aguarde o QR Code.",
-            "new_session": new_session
+            "message": f"Sessão '{name}' iniciada! Aguarde o QR Code.",
+            "new_session": name
         }
     except Exception as e:
-        logger.error(f"Session pivot error: {e}")
+        logger.error(f"START [{name}]: Error: {e}")
         return {"status": "error", "message": str(e)}
 
 
