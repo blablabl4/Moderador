@@ -1223,30 +1223,32 @@ async def receive_webhook(request: Request):
 
         sender_num = sender_id.split("@")[0] if sender_id else ""
         mod_ids = config.get("moderator_bot_ids", [])
-        
-        # Resolve LID → phone number if sender is a LID
-        resolved_phone = ""
+        mod_set = set(mod_ids)
         is_lid = "@lid" in sender_id
-        if is_lid and sender_num:
-            try:
-                lid_map = await op.wpp.get_group_members_phones(chat_id)
-                resolved_phone = lid_map.get(sender_num, "")
-                if resolved_phone and resolved_phone != sender_num:
-                    logger.info(f"⚡ LID_RESOLVE: {sender_num} → {resolved_phone}")
-            except Exception as e:
-                logger.warning(f"⚡ LID_RESOLVE error: {e}")
 
-        # Build set of all IDs to check: raw sender_num + resolved phone + full sender_id
-        sender_identifiers = {sender_num, sender_id}
-        if resolved_phone:
-            sender_identifiers.add(resolved_phone)
-
-        logger.info(f"⚡ REACTION: sender_id={sender_id}, sender_num={sender_num}, resolved={resolved_phone}, mod_ids={mod_ids}")
+        logger.info(f"⚡ REACTION: sender_id={sender_id}, sender_num={sender_num}, mod_ids={mod_ids}")
 
         if mod_ids and sender_num:
-            # Check phone numbers, LIDs, and resolved phones against moderator list
-            if not sender_identifiers & set(mod_ids):
-                logger.info(f"⚡ REACTION: from non-moderator {sender_id[:30]}, ignoring. Add '{sender_num}' or '{resolved_phone or sender_id}' to moderator_bot_ids if this is a moderator.")
+            # FAST CHECK: LID or number directly in mod_ids (no API call)
+            if sender_num in mod_set or sender_id in mod_set:
+                logger.info(f"⚡ REACTION: ✅ direct match for {sender_num}")
+            # FALLBACK: resolve LID → phone via group members API
+            elif is_lid:
+                resolved_phone = ""
+                try:
+                    lid_map = await op.wpp.get_group_members_phones(chat_id)
+                    resolved_phone = lid_map.get(sender_num, "")
+                    if resolved_phone and resolved_phone != sender_num:
+                        logger.info(f"⚡ LID_RESOLVE: {sender_num} → {resolved_phone}")
+                except Exception as e:
+                    logger.warning(f"⚡ LID_RESOLVE error: {e}")
+                if resolved_phone and resolved_phone in mod_set:
+                    logger.info(f"⚡ REACTION: ✅ phone match via LID resolve: {resolved_phone}")
+                else:
+                    logger.info(f"⚡ REACTION: from non-moderator {sender_id[:30]}, ignoring. Add '{sender_num}' or '{resolved_phone or sender_id}' to moderator_bot_ids.")
+                    return {"status": "not_moderator"}
+            else:
+                logger.info(f"⚡ REACTION: from non-moderator {sender_num}, ignoring.")
                 return {"status": "not_moderator"}
         elif not mod_ids:
             logger.warning(f"⚡ REACTION: no moderator_bot_ids configured, accepting all reactions")
