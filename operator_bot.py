@@ -255,82 +255,6 @@ class OperatorWPPClient:
                 logger.error(f"Error getting groups: {e}")
                 return []
 
-    async def get_group_members_phones(self, group_id: str) -> dict:
-        """Fetch group participants and build a LID→phone mapping.
-        Tries multiple WPP API endpoints. Returns dict like {'211854211215482': '5511983426767', ...}"""
-        lid_to_phone = {}
-        
-        async with httpx.AsyncClient(timeout=15) as client:
-            # Try multiple endpoints
-            endpoints = [
-                f"{self.base_url}/api/{self.session}/group-members/{group_id}",
-                f"{self.base_url}/api/{self.session}/group-participants/{group_id}",
-            ]
-            
-            members_raw = None
-            for url in endpoints:
-                try:
-                    resp = await client.get(url, headers=self.headers)
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        # Handle both direct array and {response: [...]} format
-                        if isinstance(data, list) and len(data) > 0:
-                            members_raw = data
-                            break
-                        elif isinstance(data, dict):
-                            inner = data.get("response") or data.get("data") or data.get("participants") or []
-                            if isinstance(inner, list) and len(inner) > 0:
-                                members_raw = inner
-                                break
-                        logger.info(f"LID_RESOLVE: {url.split('/')[-2]} returned {type(data).__name__}, len={len(data) if hasattr(data, '__len__') else '?'}")
-                except Exception as e:
-                    logger.warning(f"LID_RESOLVE: {url.split('/')[-1]} error: {e}")
-            
-            # Fallback: extract from all-groups groupMetadata
-            if not members_raw:
-                try:
-                    url = f"{self.base_url}/api/{self.session}/all-groups"
-                    resp = await client.get(url, headers=self.headers)
-                    if resp.status_code == 200:
-                        all_data = resp.json()
-                        groups = all_data if isinstance(all_data, list) else all_data.get("response", [])
-                        for g in groups:
-                            gid = g.get("id", {})
-                            gid_str = gid.get("_serialized", "") if isinstance(gid, dict) else str(gid)
-                            if gid_str == group_id:
-                                meta = g.get("groupMetadata", {}) or {}
-                                members_raw = meta.get("participants", [])
-                                logger.info(f"LID_RESOLVE: found {len(members_raw or [])} participants via all-groups fallback")
-                                break
-                except Exception as e:
-                    logger.warning(f"LID_RESOLVE: all-groups fallback error: {e}")
-            
-            if not members_raw:
-                logger.warning(f"LID_MAP [{group_id[:25]}]: no members found from any endpoint")
-                return {}
-            
-            # Parse members into LID→phone mapping
-            for m in members_raw:
-                mid = m.get("id", {})
-                if isinstance(mid, dict):
-                    serialized = mid.get("_serialized", "")
-                    user = mid.get("user", "")
-                else:
-                    serialized = str(mid)
-                    user = str(mid).split("@")[0]
-                
-                num = serialized.split("@")[0] if serialized else user
-                
-                if "@lid" in serialized:
-                    # LID member — for now map to its own number (can't resolve without WA business API)
-                    lid_to_phone[num] = user if user != num else num
-                elif "@c.us" in serialized:
-                    # Regular phone number
-                    lid_to_phone[num] = num
-            
-            logger.info(f"LID_MAP [{group_id[:25]}]: {len(lid_to_phone)} members mapped, sample={list(lid_to_phone.items())[:3]}")
-            return lid_to_phone
-
     async def close_session(self):
         """Close/kill existing session to release the browser lock."""
         url = f"{self.base_url}/api/{self.session}/close-session"
@@ -1222,65 +1146,16 @@ async def receive_webhook(request: Request):
         if monitored and chat_id and chat_id not in monitored:
             return {"status": "not_monitored_group"}
 
-        # Extract who reacted — WPP puts it in id.participant or senderUserJid
+        # Extract who reacted (for logging only — emoji is the only validator)
         sender_id = ""
-        # Priority 1: id.participant (most reliable for reactions)
         id_obj = response.get("id") or data.get("id") or {}
         if isinstance(id_obj, dict):
             participant = id_obj.get("participant", "")
-            if isinstance(participant, dict):
-                sender_id = participant.get("_serialized", "") or participant.get("user", "")
-            elif isinstance(participant, str):
-                sender_id = participant
-        # Priority 2: senderUserJid (some WPP versions)
+            sender_id = participant.get("_serialized", "") if isinstance(participant, dict) else str(participant)
         if not sender_id:
-            sender_id = response.get("senderUserJid") or data.get("senderUserJid") or ""
-        # Priority 3: sender field
-        if not sender_id:
-            sender_obj = response.get("sender", {}) or response.get("senderId", "")
-            if isinstance(sender_obj, dict):
-                sender_id = sender_obj.get("id", "") or sender_obj.get("_serialized", "") or sender_obj.get("user", "")
-            elif isinstance(sender_obj, str):
-                sender_id = sender_obj
-        # Priority 4: reactionBy
-        if not sender_id:
-            reaction_by = response.get("reactionBy", "")
-            if isinstance(reaction_by, str):
-                sender_id = reaction_by
-            elif isinstance(reaction_by, dict):
-                sender_id = reaction_by.get("_serialized", "") or reaction_by.get("user", "")
+            sender_id = response.get("senderUserJid") or data.get("senderUserJid") or "unknown"
 
-        sender_num = sender_id.split("@")[0] if sender_id else ""
-        mod_ids = config.get("moderator_bot_ids", [])
-        mod_set = set(mod_ids)
-        is_lid = "@lid" in sender_id
-
-        logger.info(f"⚡ REACTION: sender_id={sender_id}, sender_num={sender_num}, mod_ids={mod_ids}")
-
-        if mod_ids and sender_num:
-            # FAST CHECK: LID or number directly in mod_ids (no API call)
-            if sender_num in mod_set or sender_id in mod_set:
-                logger.info(f"⚡ REACTION: ✅ direct match for {sender_num}")
-            # FALLBACK: resolve LID → phone via group members API
-            elif is_lid:
-                resolved_phone = ""
-                try:
-                    lid_map = await op.wpp.get_group_members_phones(chat_id)
-                    resolved_phone = lid_map.get(sender_num, "")
-                    if resolved_phone and resolved_phone != sender_num:
-                        logger.info(f"⚡ LID_RESOLVE: {sender_num} → {resolved_phone}")
-                except Exception as e:
-                    logger.warning(f"⚡ LID_RESOLVE error: {e}")
-                if resolved_phone and resolved_phone in mod_set:
-                    logger.info(f"⚡ REACTION: ✅ phone match via LID resolve: {resolved_phone}")
-                else:
-                    logger.info(f"⚡ REACTION: from non-moderator {sender_id[:30]}, ignoring. Add '{sender_num}' or '{resolved_phone or sender_id}' to moderator_bot_ids.")
-                    return {"status": "not_moderator"}
-            else:
-                logger.info(f"⚡ REACTION: from non-moderator {sender_num}, ignoring.")
-                return {"status": "not_moderator"}
-        elif not mod_ids:
-            logger.warning(f"⚡ REACTION: no moderator_bot_ids configured, accepting all reactions")
+        logger.info(f"⚡ REACTION: ✅ emoji={reaction_emoji} from {sender_id[:30]}, approved!")
 
         logger.info(f"REACTION [{op.name}]: 🔁 approved ad! msg_id={reacted_msg_id[:50]}, chat={chat_id[:25]}")
 

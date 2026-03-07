@@ -626,13 +626,9 @@
                                     <span style="color:var(--text-dim)">Clique "Carregar Grupos" primeiro</span>
                                 </div>
                             </div>
-                            <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">
+                            <div style="display:grid; grid-template-columns:1fr; gap:6px;">
                                 <div>
-                                    <label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:4px;">IDs Moderadores</label>
-                                    <input id="cfg_modids_${s.name}" type="text" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px;font-size:11px;" placeholder="5511...">
-                                </div>
-                                <div>
-                                    <label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:4px;">Emoji</label>
+                                    <label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:4px;">Emoji de aprovação</label>
                                     <input id="cfg_emoji_${s.name}" type="text" style="width:60px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px;font-size:11px;" value="🔁">
                                 </div>
                             </div>
@@ -757,12 +753,8 @@
             if (targetSel) populateCheckboxes(targetSel, groups, savedTargets, 'target');
             if (monSel) populateCheckboxes(monSel, groups, savedMonitored, 'monitored');
 
-            // Also load other config fields
             if (cfg) {
                 const el = (id) => document.getElementById(id);
-                if (el(`cfg_modids_${name}`)) {
-                    el(`cfg_modids_${name}`).value = (cfg.moderator_bot_ids || []).join(',');
-                }
                 if (el(`cfg_emoji_${name}`)) {
                     el(`cfg_emoji_${name}`).value = cfg.approved_emoji || '🔁';
                 }
@@ -782,9 +774,6 @@
                 if (targetDiv) populateCheckboxes(targetDiv, groups, cfg.target_groups || [], 'target');
                 if (monDiv) populateCheckboxes(monDiv, groups, cfg.monitored_groups || [], 'monitored');
             }
-            if (el(`cfg_modids_${name}`)) {
-                el(`cfg_modids_${name}`).value = (cfg.moderator_bot_ids || []).join(',');
-            }
             if (el(`cfg_emoji_${name}`)) {
                 el(`cfg_emoji_${name}`).value = cfg.approved_emoji || '🔁';
             }
@@ -798,13 +787,11 @@
             const monDiv = el(`cfg_monitored_${name}`);
             const tgt = targetDiv ? Array.from(targetDiv.querySelectorAll('input[type=checkbox]:checked')).map(cb => cb.value) : [];
             const mon = monDiv ? Array.from(monDiv.querySelectorAll('input[type=checkbox]:checked')).map(cb => cb.value) : [];
-            const mod = (el(`cfg_modids_${name}`)?.value || '').split(',').map(s => s.trim()).filter(Boolean);
             const emoji = el(`cfg_emoji_${name}`)?.value?.trim() || '🔁';
 
             const payload = {
                 target_groups: tgt,
                 monitored_groups: mon,
-                moderator_bot_ids: mod,
                 approved_emoji: emoji,
             };
 
