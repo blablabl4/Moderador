@@ -179,16 +179,13 @@ class OperatorWPPClient:
 
     async def start_session(self):
         """Start the WPP session. Sends webhook URL in the body so WPP server
-        knows where to deliver events. Uses public URL for cross-service reliability."""
+        knows where to deliver events. Uses internal Railway URL for reliability."""
         if not self.token:
             logger.warning("start_session called without token, generating...")
             await self.generate_token()
 
-        # Public URL — works across Railway services regardless of private networking
-        webhook_url = os.environ.get(
-            "OPERATOR_WEBHOOK_URL",
-            "https://victorious-transformation-moderador.up.railway.app/webhook"
-        )
+        # Build webhook URL: prefer internal Railway networking (same project)
+        webhook_url = self._get_webhook_url()
         url = f"{self.base_url}/api/{self.session}/start-session"
         async with httpx.AsyncClient(timeout=30) as client:
             try:
@@ -202,23 +199,10 @@ class OperatorWPPClient:
                 logger.error(f"Error starting session: {e}")
 
     async def subscribe_webhook(self):
-        """Re-subscribe to webhook events (like the moderator bot does)."""
-        webhook_url = os.environ.get(
-            "OPERATOR_WEBHOOK_URL",
-            "https://victorious-transformation-moderador.up.railway.app/webhook"
-        )
+        """Check session status after starting."""
+        webhook_url = self._get_webhook_url()
+        logger.info(f"📨 WEBHOOK CONFIG: events should arrive at → {webhook_url}")
         async with httpx.AsyncClient(timeout=15) as client:
-            # Method 1: POST to /subscribe
-            try:
-                url = f"{self.base_url}/api/{self.session}/subscribe"
-                resp = await client.post(url, json={
-                    "webhook": webhook_url,
-                    "events": ["onMessage", "onAnyMessage", "onReactionMessage"]
-                }, headers=self.headers)
-                logger.info(f"📨 Subscribe webhook: {resp.status_code} - {resp.text[:200]}")
-            except Exception as e:
-                logger.warning(f"Subscribe failed (non-fatal): {e}")
-
             # Check session status
             try:
                 url = f"{self.base_url}/api/{self.session}/status-session"
@@ -226,6 +210,21 @@ class OperatorWPPClient:
                 logger.info(f"Session status: {resp.status_code} - {resp.text[:200]}")
             except Exception as e:
                 logger.warning(f"Status check failed: {e}")
+
+    @staticmethod
+    def _get_webhook_url():
+        """Build the webhook URL. Prefers internal Railway domain for reliability."""
+        # Allow explicit override
+        explicit = os.environ.get("OPERATOR_WEBHOOK_URL")
+        if explicit:
+            return explicit
+        # Use Railway internal networking (same project, no public DNS needed)
+        private_domain = os.environ.get("RAILWAY_PRIVATE_DOMAIN")
+        port = os.environ.get("PORT", "8001")
+        if private_domain:
+            return f"http://{private_domain}:{port}/webhook"
+        # Fallback to public URL
+        return "https://victorious-transformation-moderador.up.railway.app/webhook"
 
     async def get_all_groups(self):
         """Get all groups this session is part of."""
