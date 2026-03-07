@@ -384,21 +384,40 @@ class OperatorWPPClient:
 
     async def forward_message(self, to_chat_id: str, message_id: str) -> bool:
         """Forward a message using native forward-messages (preserves quality).
-        NO FALLBACK — only forward-messages. If it fails, we log and move on."""
+        Two approaches: string messageId, then array [messageId] as fallback."""
         url = f"{self.base_url}/api/{self.session}/forward-messages"
+        is_group = "@g.us" in to_chat_id
+
+        # Approach 1: messageId as string
         payload = {
             "phone": to_chat_id,
             "messageId": message_id,
-            "isGroup": "@g.us" in to_chat_id,
+            "isGroup": is_group,
         }
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
+                logger.info(f"FORWARD: POST {url} | phone={to_chat_id[:30]} | isGroup={is_group} | msgId={message_id[:50]}")
                 resp = await client.post(url, json=payload, headers=self.headers)
+                logger.info(f"FORWARD [string]: {resp.status_code} - {resp.text[:300]}")
                 if resp.status_code in (200, 201):
                     body = resp.json() if resp.text else {}
                     if body.get("status") != "error":
                         return True
-                logger.warning(f"forward failed: {resp.status_code} - {resp.text[:200]}")
+
+                # Approach 2: messageId as array (some WPP versions need this)
+                payload2 = {
+                    "phone": to_chat_id,
+                    "messageId": [message_id],
+                    "isGroup": is_group,
+                }
+                resp2 = await client.post(url, json=payload2, headers=self.headers)
+                logger.info(f"FORWARD [array]: {resp2.status_code} - {resp2.text[:300]}")
+                if resp2.status_code in (200, 201):
+                    body = resp2.json() if resp2.text else {}
+                    if body.get("status") != "error":
+                        return True
+
+                logger.warning(f"⚠️ forward failed both approaches")
         except Exception as e:
             logger.error(f"forward error: {e}")
         return False
