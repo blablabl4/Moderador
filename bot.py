@@ -1549,13 +1549,12 @@ def parse_group(g):
 
 @app.get("/api/groups/list")
 async def api_groups_list(username: str = Depends(get_current_username)):
-    """List groups where the bot is ADMIN (not just member)."""
+    """List ALL groups the bot is part of, with is_admin flag."""
     await ensure_token()
     groups = await wpp.get_all_groups()
     all_parsed = [parse_group(g) for g in groups]
-    # Only show groups where bot is admin
-    result = [g for g in all_parsed if g.get("is_admin")]
-    return {"groups": result, "total": len(result)}
+    # Return ALL groups — let the UI show admin badge
+    return {"groups": all_parsed, "total": len(all_parsed)}
 
 @app.get("/api/analytics/advertisers")
 async def api_analytics_advertisers(username: str = Depends(get_current_username)):

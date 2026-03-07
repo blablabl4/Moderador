@@ -1908,34 +1908,43 @@
                 try {
                     const gRes = await fetch('/api/groups/list');
                     const gData = await gRes.json();
+                    const wppGroups = (gData.groups || []);
+
+                    // Build a merged list: WPP groups + config-only groups (preserve selections)
+                    const seenIds = new Set(wppGroups.map(g => g.id));
+                    const allConfigIds = [...new Set([...monitoredGroups, ...phoneRequiredGroups])];
+                    const configOnlyGroups = allConfigIds.filter(id => id && !seenIds.has(id)).map(id => ({
+                        id, name: id.replace('@g.us', ''), is_admin: false, config_only: true
+                    }));
+                    const allGroups = [...wppGroups, ...configOnlyGroups];
+
+                    function renderGroupCheckboxes(container, groups, selectedIds, cssClass, accentColor) {
+                        if (groups.length === 0) {
+                            container.innerHTML = '<div style="color:#666;padding:8px;">Nenhum grupo encontrado</div>';
+                            return;
+                        }
+                        container.innerHTML = groups.map(g => {
+                            const checked = selectedIds.includes(g.id) ? 'checked' : '';
+                            const adminBadge = g.is_admin ? '<span style="background:#25D366;color:#000;padding:1px 5px;border-radius:4px;font-size:10px;font-weight:700;margin-left:4px;">ADMIN</span>' : '';
+                            const configBadge = g.config_only ? '<span style="background:#e94560;color:#fff;padding:1px 5px;border-radius:4px;font-size:10px;margin-left:4px;">Não listado</span>' : '';
+                            return `<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;cursor:pointer;border-bottom:1px solid rgba(255,255,255,0.05);">
+                                <input type="checkbox" class="${cssClass}" value="${g.id}" ${checked} style="accent-color:${accentColor};">
+                                <span style="color:#ccc;font-size:13px;">${g.name}${adminBadge}${configBadge}</span>
+                            </label>`;
+                        }).join('');
+                    }
 
                     // Monitored groups checkboxes
-                    const container = document.getElementById('monitored-groups-list');
-                    if (gData.groups && gData.groups.length > 0) {
-                        container.innerHTML = gData.groups.map(g => {
-                            const checked = monitoredGroups.includes(g.id) ? 'checked' : '';
-                            return `<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;cursor:pointer;border-bottom:1px solid rgba(255,255,255,0.05);">
-                                <input type="checkbox" class="monitored-group-cb" value="${g.id}" ${checked} style="accent-color:#e94560;">
-                                <span style="color:#ccc;font-size:13px;">${g.name}</span>
-                            </label>`;
-                        }).join('');
-                    } else {
-                        container.innerHTML = '<div style="color:#666;padding:8px;">Nenhum grupo encontrado</div>';
-                    }
+                    renderGroupCheckboxes(
+                        document.getElementById('monitored-groups-list'),
+                        allGroups, monitoredGroups, 'monitored-group-cb', '#e94560'
+                    );
 
                     // Phone required groups checkboxes
-                    const phoneContainer = document.getElementById('phone-required-groups-list');
-                    if (gData.groups && gData.groups.length > 0) {
-                        phoneContainer.innerHTML = gData.groups.map(g => {
-                            const checked = phoneRequiredGroups.includes(g.id) ? 'checked' : '';
-                            return `<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;cursor:pointer;border-bottom:1px solid rgba(255,255,255,0.05);">
-                                <input type="checkbox" class="phone-required-group-cb" value="${g.id}" ${checked} style="accent-color:#f5a623;">
-                                <span style="color:#ccc;font-size:13px;">${g.name}</span>
-                            </label>`;
-                        }).join('');
-                    } else {
-                        phoneContainer.innerHTML = '<div style="color:#666;padding:8px;">Nenhum grupo encontrado</div>';
-                    }
+                    renderGroupCheckboxes(
+                        document.getElementById('phone-required-groups-list'),
+                        allGroups, phoneRequiredGroups, 'phone-required-group-cb', '#f5a623'
+                    );
                 } catch (ge) {
                     document.getElementById('monitored-groups-list').innerHTML = '<div style="color:#e94560;padding:8px;">Erro ao carregar grupos</div>';
                     document.getElementById('phone-required-groups-list').innerHTML = '<div style="color:#e94560;padding:8px;">Erro ao carregar grupos</div>';
