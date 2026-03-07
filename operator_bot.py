@@ -255,6 +255,44 @@ class OperatorWPPClient:
                 logger.error(f"Error getting groups: {e}")
                 return []
 
+    async def get_group_members_phones(self, group_id: str) -> dict:
+        """Fetch group participants and build a LID→phone mapping.
+        Returns dict like {'211854211215482': '5511983426767', ...}"""
+        url = f"{self.base_url}/api/{self.session}/group-members/{group_id}"
+        async with httpx.AsyncClient(timeout=15) as client:
+            try:
+                resp = await client.get(url, headers=self.headers)
+                if resp.status_code == 200:
+                    members = resp.json()
+                    lid_to_phone = {}
+                    if isinstance(members, list):
+                        for m in members:
+                            mid = m.get("id", {})
+                            if isinstance(mid, dict):
+                                serialized = mid.get("_serialized", "")
+                                user = mid.get("user", "")
+                            else:
+                                serialized = str(mid)
+                                user = str(mid).split("@")[0]
+                            # If this is a LID, try to find the phone via verifiedName or other fields
+                            if "@lid" in serialized:
+                                lid_num = serialized.split("@")[0]
+                                # Check if there's a linked phone in the contact
+                                phone = m.get("verifiedName", "") or m.get("pushname", "")
+                                lid_to_phone[lid_num] = user  # user field sometimes has phone
+                            elif "@c.us" in serialized:
+                                # Regular phone number — map it to itself
+                                phone_num = serialized.split("@")[0]
+                                lid_to_phone[phone_num] = phone_num
+                    logger.info(f"LID_MAP [{group_id[:20]}]: {len(lid_to_phone)} members mapped")
+                    return lid_to_phone
+                else:
+                    logger.warning(f"get_group_members_phones: {resp.status_code}")
+                    return {}
+            except Exception as e:
+                logger.warning(f"get_group_members_phones error: {e}")
+                return {}
+
     async def close_session(self):
         """Close/kill existing session to release the browser lock."""
         url = f"{self.base_url}/api/{self.session}/close-session"
@@ -1185,13 +1223,30 @@ async def receive_webhook(request: Request):
 
         sender_num = sender_id.split("@")[0] if sender_id else ""
         mod_ids = config.get("moderator_bot_ids", [])
+        
+        # Resolve LID → phone number if sender is a LID
+        resolved_phone = ""
+        is_lid = "@lid" in sender_id
+        if is_lid and sender_num:
+            try:
+                lid_map = await op.wpp.get_group_members_phones(chat_id)
+                resolved_phone = lid_map.get(sender_num, "")
+                if resolved_phone and resolved_phone != sender_num:
+                    logger.info(f"⚡ LID_RESOLVE: {sender_num} → {resolved_phone}")
+            except Exception as e:
+                logger.warning(f"⚡ LID_RESOLVE error: {e}")
 
-        logger.info(f"⚡ REACTION: sender_id={sender_id}, sender_num={sender_num}, mod_ids={mod_ids}")
+        # Build set of all IDs to check: raw sender_num + resolved phone + full sender_id
+        sender_identifiers = {sender_num, sender_id}
+        if resolved_phone:
+            sender_identifiers.add(resolved_phone)
+
+        logger.info(f"⚡ REACTION: sender_id={sender_id}, sender_num={sender_num}, resolved={resolved_phone}, mod_ids={mod_ids}")
 
         if mod_ids and sender_num:
-            # Check both phone numbers AND LIDs in the moderator list
-            if sender_num not in mod_ids and sender_id not in mod_ids:
-                logger.info(f"⚡ REACTION: from non-moderator {sender_id[:30]}, ignoring. Add '{sender_num}' or '{sender_id}' to moderator_bot_ids if this is a moderator.")
+            # Check phone numbers, LIDs, and resolved phones against moderator list
+            if not sender_identifiers & set(mod_ids):
+                logger.info(f"⚡ REACTION: from non-moderator {sender_id[:30]}, ignoring. Add '{sender_num}' or '{resolved_phone or sender_id}' to moderator_bot_ids if this is a moderator.")
                 return {"status": "not_moderator"}
         elif not mod_ids:
             logger.warning(f"⚡ REACTION: no moderator_bot_ids configured, accepting all reactions")
