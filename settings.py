@@ -42,8 +42,9 @@ DEFAULTS = {
     "exclusive_groups_enabled": False,  # Prevent users from being in multiple monitored groups
     "exclusive_groups_message": "⚠️ Você já faz parte de outro grupo moderado. Só é permitido participar de um grupo por vez.",
     "monitored_groups": ["120363406870144681@g.us", "120363424437184928@g.us"],  # Production + Test group
+    "flood_exempt_groups": ["120363424437184928@g.us"],  # Groups where flood control is disabled (unlimited ads)
     "broadcast_test_group_id": "120363424437184928@g.us",  # Grupo "Teste moderador"
-    "phone_required_groups": ["120363406870144681@g.us"],  # Groups where ads must have phone number
+    "phone_required_groups": ["120363406870144681@g.us", "120363424437184928@g.us"],  # Groups where ads must have phone number
     "phone_approved_emoji": "🔁",      # Emoji to react with on approved ads
     "flood_daily_limit": 1,            # Max ads per calendar day (resets at midnight)
     "flood_min_interval_minutes": 0,   # Disabled — daily limit handles everything

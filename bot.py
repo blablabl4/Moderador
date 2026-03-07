@@ -4142,34 +4142,40 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
     else:
         text_len = len(body)
     
-    flood_lock = _get_flood_lock(sender_id, group_id)
-    async with flood_lock:
-        db = SessionLocal()
-        try:
-            result = process_flood_control(db, sender_id, group_id, has_media, text_len)
-            log_entry["flood_result"] = result
+    # Skip flood control for exempt groups (unlimited ads, e.g. test groups)
+    flood_exempt = cfg.get("flood_exempt_groups", [])
+    if group_id in flood_exempt:
+        logger.info(f"FLOOD_EXEMPT: group {group_id[:20]} is exempt from flood control")
+        log_entry["flood_result"] = {"allowed": True, "debug": "flood_exempt_group"}
+    else:
+        flood_lock = _get_flood_lock(sender_id, group_id)
+        async with flood_lock:
+            db = SessionLocal()
+            try:
+                result = process_flood_control(db, sender_id, group_id, has_media, text_len)
+                log_entry["flood_result"] = result
 
-            if not result["allowed"]:
-                reason = result.get("reason", "flood")
-                logger.info(f"BLOCKED: ({reason}) {sender_id[:20]} in {group_id[:20]}")
-                # Build specific reason message
-                if reason == "daily_limit":
-                    _flood_msg = f"🚫 Limite diário atingido ({result.get('count', '?')}/{result.get('max', '?')} anúncios). Tente novamente amanhã."
-                elif reason == "min_interval":
-                    _flood_msg = f"🚫 Aguarde {result.get('wait_min', '?')} minutos antes de postar novamente."
-                elif reason == "text_length":
-                    _flood_msg = f"🚫 Texto muito longo ({result.get('text_len', '?')} chars). Máximo: {result.get('max_text', 300)} caracteres."
-                else:
-                    _flood_msg = "🚫 Mensagem bloqueada pelo controle de flood."
-                enforce_result = await enforce_action("delete_warn", group_id, msg_id, _flood_msg, sender_id=sender_id)
-                log_entry["status"] = f"violation_{reason}"
-                log_entry["enforce_result"] = enforce_result
-                _log_webhook(log_entry)
-                background_tasks.add_task(_save_moderation_log, group_id, sender_id, msg_type,
-                                          msg_id, caption or body[:300], f"violation_{reason}", str(result))
-                return {"status": f"violation_{reason}"}
-        finally:
-            db.close()
+                if not result["allowed"]:
+                    reason = result.get("reason", "flood")
+                    logger.info(f"BLOCKED: ({reason}) {sender_id[:20]} in {group_id[:20]}")
+                    # Build specific reason message
+                    if reason == "daily_limit":
+                        _flood_msg = f"🚫 Limite diário atingido ({result.get('count', '?')}/{result.get('max', '?')} anúncios). Tente novamente amanhã."
+                    elif reason == "min_interval":
+                        _flood_msg = f"🚫 Aguarde {result.get('wait_min', '?')} minutos antes de postar novamente."
+                    elif reason == "text_length":
+                        _flood_msg = f"🚫 Texto muito longo ({result.get('text_len', '?')} chars). Máximo: {result.get('max_text', 300)} caracteres."
+                    else:
+                        _flood_msg = "🚫 Mensagem bloqueada pelo controle de flood."
+                    enforce_result = await enforce_action("delete_warn", group_id, msg_id, _flood_msg, sender_id=sender_id)
+                    log_entry["status"] = f"violation_{reason}"
+                    log_entry["enforce_result"] = enforce_result
+                    _log_webhook(log_entry)
+                    background_tasks.add_task(_save_moderation_log, group_id, sender_id, msg_type,
+                                              msg_id, caption or body[:300], f"violation_{reason}", str(result))
+                    return {"status": f"violation_{reason}"}
+            finally:
+                db.close()
 
     # 6c. AD VALIDATION — Only image/video with phone number ≤300 chars is valid
     logger.info(f"AD_FILTER_DEBUG: type={msg_type} group_in_required={group_id in phone_required} caption={str(caption)[:80]} body_len={len(body)}")

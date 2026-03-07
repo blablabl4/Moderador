@@ -1399,6 +1399,17 @@
                         </div>
 
                         <div class="setting-group">
+                            <div class="setting-group-title">🔓 Grupos Sem Limite de Anúncios</div>
+                            <p style="color:#888;margin:0 0 10px;font-size:13px;">Grupos onde o controle de flood está
+                                <strong>desativado</strong> (anúncios ilimitados). Links e figurinhas ainda são filtrados.
+                            </p>
+                            <div id="flood-exempt-groups-list"
+                                style="max-height:200px;overflow-y:auto;background:rgba(0,0,0,0.2);border-radius:8px;padding:8px;">
+                                <div style="color:#666;padding:8px;">⏳ Carregando grupos...</div>
+                            </div>
+                        </div>
+
+                        <div class="setting-group">
                             <div class="setting-group-title">📡 Broadcast / Teste</div>
                             <div class="setting-row">
                                 <div class="setting-label">Grupo de teste<small>ID do grupo usado para testes de
@@ -1905,6 +1916,7 @@
                 // Load groups list for both checkboxes (monitored + phone_required)
                 const monitoredGroups = s.monitored_groups || [];
                 const phoneRequiredGroups = s.phone_required_groups || [];
+                const floodExemptGroups = s.flood_exempt_groups || [];
                 try {
                     const gRes = await fetch('/api/groups/list');
                     const gData = await gRes.json();
@@ -1912,7 +1924,7 @@
 
                     // Build a merged list: WPP groups + config-only groups (preserve selections)
                     const seenIds = new Set(wppGroups.map(g => g.id));
-                    const allConfigIds = [...new Set([...monitoredGroups, ...phoneRequiredGroups])];
+                    const allConfigIds = [...new Set([...monitoredGroups, ...phoneRequiredGroups, ...floodExemptGroups])];
                     const configOnlyGroups = allConfigIds.filter(id => id && !seenIds.has(id)).map(id => ({
                         id, name: id.replace('@g.us', ''), is_admin: false, config_only: true
                     }));
@@ -1945,9 +1957,16 @@
                         document.getElementById('phone-required-groups-list'),
                         allGroups, phoneRequiredGroups, 'phone-required-group-cb', '#f5a623'
                     );
+
+                    // Flood exempt groups checkboxes
+                    renderGroupCheckboxes(
+                        document.getElementById('flood-exempt-groups-list'),
+                        allGroups, floodExemptGroups, 'flood-exempt-group-cb', '#00b4d8'
+                    );
                 } catch (ge) {
                     document.getElementById('monitored-groups-list').innerHTML = '<div style="color:#e94560;padding:8px;">Erro ao carregar grupos</div>';
                     document.getElementById('phone-required-groups-list').innerHTML = '<div style="color:#e94560;padding:8px;">Erro ao carregar grupos</div>';
+                    document.getElementById('flood-exempt-groups-list').innerHTML = '<div style="color:#e94560;padding:8px;">Erro ao carregar grupos</div>';
                 }
 
                 document.getElementById('settings-loading').style.display = 'none';
@@ -1981,6 +2000,7 @@
                 super_admins: document.getElementById('cfg-super_admins').value.split(',').map(s => s.trim()).filter(Boolean),
                 monitored_groups: [...document.querySelectorAll('.monitored-group-cb:checked')].map(cb => cb.value),
                 phone_required_groups: [...document.querySelectorAll('.phone-required-group-cb:checked')].map(cb => cb.value),
+                flood_exempt_groups: [...document.querySelectorAll('.flood-exempt-group-cb:checked')].map(cb => cb.value),
                 phone_approved_emoji: document.getElementById('cfg-phone_approved_emoji').value || '🔁',
                 broadcast_test_group_id: document.getElementById('cfg-broadcast_test_group_id').value,
                 exclusive_groups_enabled: document.getElementById('cfg-exclusive_groups_enabled').checked,
