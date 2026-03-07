@@ -1359,45 +1359,6 @@ async def api_status(username: str = Depends(get_current_username)):
         "session_id": wpp.session
     }
 
-@app.get("/api/debug/wpp-apis")
-async def debug_wpp_apis(username: str = Depends(get_current_username)):
-    """Test which WPP API endpoints exist."""
-    await ensure_token()
-    results = {}
-    test_endpoints = [
-        ("GET", "api-docs"),
-        ("POST", f"api/{wpp.session}/forward-messages"),
-        ("POST", f"api/{wpp.session}/forward-message"),
-        ("POST", f"api/{wpp.session}/download-media"),
-        ("GET", f"api/{wpp.session}/get-media-by-message/test"),
-        ("POST", f"api/{wpp.session}/send-file"),
-        ("POST", f"api/{wpp.session}/send-image"),
-        ("POST", f"api/{wpp.session}/send-file-from-url"),
-        ("POST", f"api/{wpp.session}/send-file-base64"),
-    ]
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        for method, ep in test_endpoints:
-            try:
-                url = f"{wpp.base_url}/{ep}"
-                if method == "GET":
-                    resp = await client.get(url, headers=wpp.headers)
-                else:
-                    resp = await client.post(url, json={}, headers=wpp.headers)
-                results[ep] = {"status": resp.status_code, "body": resp.text[:200]}
-            except Exception as e:
-                results[ep] = {"error": str(e)}
-    return results
-
-@app.get("/api/debug/test-forward")
-async def debug_test_forward(messageId: str, phone: str, username: str = Depends(get_current_username)):
-    """Test forward-messages with a specific messageId."""
-    await ensure_token()
-    fwd_url = f"{wpp.base_url}/api/{wpp.session}/forward-messages"
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        payload = {"phone": phone, "messageId": messageId, "isGroup": True}
-        resp = await client.post(fwd_url, json=payload, headers=wpp.headers)
-        return {"status": resp.status_code, "body": resp.json() if resp.text else {}}
-
 @app.get("/api/debug/last-msgs")
 async def debug_last_msgs(chat: str, username: str = Depends(get_current_username)):
     """List last 10 messages from a chat with their IDs."""
@@ -1414,13 +1375,6 @@ async def debug_last_msgs(chat: str, username: str = Depends(get_current_usernam
             "timestamp": m.get('timestamp'),
         })
     return result
-
-@app.get("/api/debug/set-config")
-async def debug_set_config(key: str, value: str, username: str = Depends(get_current_username)):
-    """Set a single config key. Example: /api/debug/set-config?key=broadcast_test_group_id&value=120...@g.us"""
-    from settings import save_settings
-    save_settings({key: value})
-    return {"ok": True, "key": key, "value": value}
 
 @app.get("/api/qr")
 async def api_qr(username: str = Depends(get_current_username)):
