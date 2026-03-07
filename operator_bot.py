@@ -549,22 +549,13 @@ class ForwardEngine:
         self._stats["total_ads_detected"] += 1
         self._stats["last_ad_detected_time"] = datetime.now().isoformat()
 
-        # Validate: only forward image/video with caption
+        # Fetch message details for logging (but don't filter — moderator already approved)
         msg_data = await wpp.get_message_by_id(chat_id, msg_id)
         if msg_data:
             msg_type = msg_data.get("type", "")
-            caption = msg_data.get("caption", "") or ""
-            if msg_type not in ("image", "video"):
-                logger.info(f"ENGINE: skip non-media msg type={msg_type}")
-                self._stats["total_skipped_not_media"] += 1
-                return
-            if not caption.strip():
-                logger.info(f"ENGINE: skip media without caption")
-                self._stats["total_skipped_not_media"] += 1
-                return
-            logger.info(f"ENGINE: ✅ validated — type={msg_type}, caption={caption[:50]}")
+            caption = msg_data.get("caption", "") or msg_data.get("body", "") or ""
+            logger.info(f"ENGINE: ✅ moderator-approved — type={msg_type}, caption={caption[:50]}")
         else:
-            # Could not fetch message details — forward anyway (moderator already validated)
             logger.warning(f"ENGINE: could not fetch msg details, forwarding anyway (trust moderator)")
 
         # Get target groups
