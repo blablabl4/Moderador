@@ -410,15 +410,38 @@ class OperatorWPPClient:
             logger.error(f"MEDIA_DL error: {e}")
         return None
 
-    async def send_media_with_caption(self, to_chat_id: str, base64_data: str, caption: str, filename: str = "ad.jpg") -> bool:
+    async def send_text(self, to_chat_id: str, text: str) -> bool:
+        """Send a text message as the bot (no forwarding tag).
+        Uses POST /api/{session}/send-message."""
+        url = f"{self.base_url}/api/{self.session}/send-message"
+        is_group = "@g.us" in to_chat_id
+        payload = {
+            "phone": to_chat_id,
+            "message": text,
+            "isGroup": is_group,
+        }
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.post(url, json=payload, headers=self.headers)
+                logger.info(f"SEND_TEXT: {resp.status_code} → {to_chat_id[:25]} | text={text[:40]}")
+                if resp.status_code in (200, 201):
+                    body = resp.json() if resp.text else {}
+                    if body.get("status") != "error":
+                        return True
+                logger.warning(f"SEND_TEXT: failed - {resp.text[:200]}")
+        except Exception as e:
+            logger.error(f"SEND_TEXT error: {e}")
+        return False
+
+    async def send_media_with_caption(self, to_chat_id: str, base64_data: str, caption: str, filename: str = "ad.jpg", mime_type: str = "image/jpeg") -> bool:
         """Send media with caption using POST /api/{session}/send-file-base64.
         This preserves the caption text (unlike forward-messages which strips it)."""
         url = f"{self.base_url}/api/{self.session}/send-file-base64"
         is_group = "@g.us" in to_chat_id
         
-        # Ensure base64 has proper data URI prefix
+        # Ensure base64 has proper data URI prefix with correct MIME type
         if not base64_data.startswith("data:"):
-            base64_data = f"data:image/jpeg;base64,{base64_data}"
+            base64_data = f"data:{mime_type};base64,{base64_data}"
         
         payload = {
             "phone": to_chat_id,
@@ -596,13 +619,29 @@ class ForwardEngine:
 
         delay = config.get("forward_delay_seconds", 0)
 
-        # Determine filename from type
-        ext_map = {"image": "ad.jpg", "video": "ad.mp4", "document": "file.pdf", "sticker": "sticker.webp", "ptt": "audio.ogg", "audio": "audio.mp3"}
-        filename = ext_map.get(msg_type, "file.bin")
+        # Determine filename and MIME type from message type
+        type_map = {
+            "image":    {"file": "ad.jpg",       "mime": "image/jpeg"},
+            "video":    {"file": "ad.mp4",       "mime": "video/mp4"},
+            "document": {"file": "file.pdf",     "mime": "application/pdf"},
+            "sticker":  {"file": "sticker.webp", "mime": "image/webp"},
+            "ptt":      {"file": "audio.ogg",    "mime": "audio/ogg"},
+            "audio":    {"file": "audio.mp3",    "mime": "audio/mpeg"},
+        }
+        info = type_map.get(msg_type, {"file": "file.bin", "mime": "application/octet-stream"})
+        filename = info["file"]
+        mime_type = info["mime"]
 
-        # Decide strategy
+        # Decide strategy: text-only, media+caption, or fallback forward
+        is_text_only = msg_type in ("chat", "") and not has_media
         use_resend = media_base64 is not None
-        strategy = "RESEND (media+caption)" if use_resend else "FORWARD (fallback)"
+        
+        if is_text_only:
+            strategy = "SEND_TEXT (as bot)"
+        elif use_resend:
+            strategy = "RESEND (media+caption)"
+        else:
+            strategy = "FORWARD (fallback)"
         logger.info(f"ENGINE: {strategy} → {len(target_groups)} groups (delay={delay}s)")
 
         success_count = 0
@@ -613,8 +652,10 @@ class ForwardEngine:
                 logger.warning(f"ENGINE: hourly limit reached at {i+1}/{len(target_groups)}")
                 break
 
-            if use_resend:
-                ok = await wpp.send_media_with_caption(group_jid, media_base64, caption, filename)
+            if is_text_only:
+                ok = await wpp.send_text(group_jid, caption)
+            elif use_resend:
+                ok = await wpp.send_media_with_caption(group_jid, media_base64, caption, filename, mime_type)
             else:
                 ok = await wpp.forward_message(group_jid, msg_id)
 
