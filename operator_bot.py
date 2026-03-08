@@ -1155,7 +1155,7 @@ async def receive_webhook(request: Request):
         if not sender_id:
             sender_id = response.get("senderUserJid") or data.get("senderUserJid") or "unknown"
 
-        logger.info(f"⚡ REACTION: ✅ emoji={reaction_emoji} from {sender_id[:30]}, approved!")
+        logger.info(f"⚡ REACTION: ✅ emoji={reaction_text} from {sender_id[:30]}, approved!")
 
         logger.info(f"REACTION [{op.name}]: 🔁 approved ad! msg_id={reacted_msg_id[:50]}, chat={chat_id[:25]}")
 
