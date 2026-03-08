@@ -381,8 +381,67 @@ class OperatorWPPClient:
                 return m
         return None
 
+    async def download_media(self, msg_id: str) -> str | None:
+        """Download media from a message as base64 data URI.
+        Uses GET /api/{session}/get-media-by-message/{messageId}"""
+        url = f"{self.base_url}/api/{self.session}/get-media-by-message/{msg_id}"
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.get(url, headers=self.headers)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    # Response format varies: could be {data: "base64..."} or direct base64
+                    base64_data = None
+                    if isinstance(data, dict):
+                        base64_data = data.get("base64") or data.get("data") or data.get("response") or None
+                        if isinstance(base64_data, dict):
+                            base64_data = base64_data.get("base64") or base64_data.get("data") or None
+                    elif isinstance(data, str) and len(data) > 100:
+                        base64_data = data
+                    
+                    if base64_data:
+                        logger.info(f"MEDIA_DL: ✅ got {len(str(base64_data))} chars base64 for {msg_id[:40]}")
+                        return str(base64_data)
+                    else:
+                        logger.warning(f"MEDIA_DL: 200 but no base64 data. Keys: {list(data.keys()) if isinstance(data, dict) else type(data)}")
+                else:
+                    logger.warning(f"MEDIA_DL: {resp.status_code} - {resp.text[:200]}")
+        except Exception as e:
+            logger.error(f"MEDIA_DL error: {e}")
+        return None
+
+    async def send_media_with_caption(self, to_chat_id: str, base64_data: str, caption: str, filename: str = "ad.jpg") -> bool:
+        """Send media with caption using POST /api/{session}/send-file-base64.
+        This preserves the caption text (unlike forward-messages which strips it)."""
+        url = f"{self.base_url}/api/{self.session}/send-file-base64"
+        is_group = "@g.us" in to_chat_id
+        
+        # Ensure base64 has proper data URI prefix
+        if not base64_data.startswith("data:"):
+            base64_data = f"data:image/jpeg;base64,{base64_data}"
+        
+        payload = {
+            "phone": to_chat_id,
+            "base64": base64_data,
+            "filename": filename,
+            "caption": caption,
+            "isGroup": is_group,
+        }
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(url, json=payload, headers=self.headers)
+                logger.info(f"SEND_MEDIA: {resp.status_code} → {to_chat_id[:25]} | caption={caption[:40]}")
+                if resp.status_code in (200, 201):
+                    body = resp.json() if resp.text else {}
+                    if body.get("status") != "error":
+                        return True
+                logger.warning(f"SEND_MEDIA: failed - {resp.text[:200]}")
+        except Exception as e:
+            logger.error(f"SEND_MEDIA error: {e}")
+        return False
+
     async def forward_message(self, to_chat_id: str, message_id: str) -> bool:
-        """Forward a message using native forward-messages (preserves quality).
+        """Forward a message using native forward-messages (fallback — may lose caption).
         Two approaches: string messageId, then array [messageId] as fallback."""
         url = f"{self.base_url}/api/{self.session}/forward-messages"
         is_group = "@g.us" in to_chat_id
@@ -496,8 +555,9 @@ class ForwardEngine:
         return self._count_recent_forwards() < max_per_hour
 
     async def process_approved_ad(self, wpp: OperatorWPPClient, msg_id: str, chat_id: str):
-        """Forward an approved ad to all target groups.
-        Only forwards image/video messages with caption (description)."""
+        """Send an approved ad to all target groups.
+        Strategy: download media + re-send with caption (preserves text).
+        Fallback: native forward (may lose caption)."""
 
         # Dedup check
         if msg_id in self._processed_ids:
@@ -505,20 +565,27 @@ class ForwardEngine:
             return
         self._processed_ids.add(msg_id)
         if len(self._processed_ids) > self._MAX_PROCESSED_CACHE:
-            # Evict oldest entries (set doesn't track order, just clear half)
             self._processed_ids = set(list(self._processed_ids)[self._MAX_PROCESSED_CACHE // 2:])
 
         self._stats["total_ads_detected"] += 1
         self._stats["last_ad_detected_time"] = datetime.now().isoformat()
 
-        # Fetch message details for logging (but don't filter — moderator already approved)
+        # 1. Fetch message details (type, caption)
         msg_data = await wpp.get_message_by_id(chat_id, msg_id)
+        msg_type = ""
+        caption = ""
         if msg_data:
             msg_type = msg_data.get("type", "")
             caption = msg_data.get("caption", "") or msg_data.get("body", "") or ""
-            logger.info(f"ENGINE: ✅ moderator-approved — type={msg_type}, caption={caption[:50]}")
+            logger.info(f"ENGINE: ✅ approved — type={msg_type}, caption={caption[:80]}")
         else:
-            logger.warning(f"ENGINE: could not fetch msg details, forwarding anyway (trust moderator)")
+            logger.warning(f"ENGINE: could not fetch msg details")
+
+        # 2. Download media (for image/video/document/sticker)
+        media_base64 = None
+        has_media = msg_type in ("image", "video", "document", "sticker", "ptt", "audio")
+        if has_media:
+            media_base64 = await wpp.download_media(msg_id)
 
         # Get target groups
         config = get_cfg()
@@ -529,18 +596,28 @@ class ForwardEngine:
 
         delay = config.get("forward_delay_seconds", 0)
 
-        logger.info(f"ENGINE: forwarding msg_id={msg_id[:40]} → {len(target_groups)} groups (delay={delay}s)")
+        # Determine filename from type
+        ext_map = {"image": "ad.jpg", "video": "ad.mp4", "document": "file.pdf", "sticker": "sticker.webp", "ptt": "audio.ogg", "audio": "audio.mp3"}
+        filename = ext_map.get(msg_type, "file.bin")
+
+        # Decide strategy
+        use_resend = media_base64 is not None
+        strategy = "RESEND (media+caption)" if use_resend else "FORWARD (fallback)"
+        logger.info(f"ENGINE: {strategy} → {len(target_groups)} groups (delay={delay}s)")
 
         success_count = 0
         fail_count = 0
 
         for i, group_jid in enumerate(target_groups):
-            # Rate limit check (if enabled)
             if not self._can_forward():
-                logger.warning(f"ENGINE: hourly limit reached, stopping at group {i+1}/{len(target_groups)}")
+                logger.warning(f"ENGINE: hourly limit reached at {i+1}/{len(target_groups)}")
                 break
 
-            ok = await wpp.forward_message(group_jid, msg_id)
+            if use_resend:
+                ok = await wpp.send_media_with_caption(group_jid, media_base64, caption, filename)
+            else:
+                ok = await wpp.forward_message(group_jid, msg_id)
+
             if ok:
                 success_count += 1
                 self._forward_log.append(datetime.now())
@@ -551,7 +628,6 @@ class ForwardEngine:
                 self._stats["total_failed"] += 1
                 logger.warning(f"ENGINE: ❌ [{i+1}/{len(target_groups)}] → {group_jid[:25]}")
 
-            # Delay between forwards (0 = no delay for testing)
             if delay > 0 and i < len(target_groups) - 1:
                 await asyncio.sleep(delay)
 
