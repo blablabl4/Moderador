@@ -1186,6 +1186,9 @@ async def health():
         "target_groups": len(config.get("target_groups", [])),
         "engine": sm.aggregated_stats,
         "total_sessions": len(sm.sessions),
+        "webhook_url": OperatorWPPClient._get_webhook_url(),
+        "private_domain": os.environ.get("RAILWAY_PRIVATE_DOMAIN", "NOT_SET"),
+        "port": os.environ.get("PORT", "NOT_SET"),
         "timestamp": datetime.now().isoformat(),
     }
 
